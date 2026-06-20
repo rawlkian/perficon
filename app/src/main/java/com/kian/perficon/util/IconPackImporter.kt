@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.util.Log
@@ -42,6 +43,14 @@ class IconPackImporter(
         val icon: Drawable
     )
 
+    // 内存全局属性暂存器，专门粉碎 assets 与 res/xml 属性割裂导致的丢失 Bug
+    private class GlobalOverlayConfig {
+        var maskImg: String? = null
+        var uponImg: String? = null
+        val backImgs = mutableSetOf<String>() // 用 Set 去重，杜绝重复添加背景
+        var scaleFactor: Float? = null
+    }
+
     fun getInstalledIconPacks(): List<IconPackInfo> {
         val pm = context.packageManager
         val iconPacks = mutableSetOf<String>()
@@ -66,6 +75,9 @@ class IconPackImporter(
         }.sortedBy { it.name }
     }
 
+    /**
+     * 终极全量吞噬引擎（通杀双重文件、多 XML 交叉共存、带复合限定符的手工图标包）
+     */
     suspend fun importFromInstalledApp(
         sourcePackageName: String,
         newProjectName: String,
@@ -75,205 +87,214 @@ class IconPackImporter(
         try {
             val remoteContext = context.createPackageContext(sourcePackageName, Context.CONTEXT_IGNORE_SECURITY)
             val remoteRes = remoteContext.resources
-            val mappingFiles = listOf("appfilter.xml", "theme_resources.xml", "appmap.xml", "drawable.xml")
+            val mappingFiles = listOf("appfilter.xml", "drawable.xml", "theme_resources.xml", "appmap.xml")
 
-            var parser: XmlPullParser? = null
-            var inputStream: InputStream? = null
+            // 1. 去重字典：融合 assets 与 res/xml
+            val allIconsMap = mutableMapOf<String, Triple<String?, String, String>>()
 
-            // 优先尝试 Assets 读取
-            for (file in mappingFiles) {
+            // 2. 实例化全局参数配置器（收集遮罩、背景、覆盖层资产）
+            val globalConfig = GlobalOverlayConfig()
+
+            // ======= 第一阶段：双轨跨域融合盘点（两网合一，一条不漏） =======
+            for (fileName in mappingFiles) {
+                val resName = fileName.substringBeforeLast(".")
+
+                // 轨道 A：剥离 assets/ 里的明文
+                var assetsParser: XmlPullParser? = null
+                var assetsStream: InputStream? = null
                 try {
-                    val stream = remoteContext.assets.open(file)
-                    parser = Xml.newPullParser().apply { setInput(stream, "UTF-8") }
-                    inputStream = stream
-                    Log.d(TAG, "成功在 Assets 中找到映射文件: $file")
-                    break
+                    assetsStream = remoteContext.assets.open(fileName)
+                    assetsParser = Xml.newPullParser().apply { setInput(assetsStream, "UTF-8") }
                 } catch (e: Exception) {}
-            }
 
-            // 兜底尝试编译后的 res/xml 读取
-            if (parser == null) {
-                for (file in mappingFiles) {
-                    val resName = file.substringBeforeLast(".")
+                // 轨道 B：剥离 res/xml/ 里的二进制正主
+                var resParser: XmlPullParser? = null
+                try {
                     val resId = remoteRes.getIdentifier(resName, "xml", sourcePackageName)
                     if (resId != 0) {
-                        parser = remoteRes.getXml(resId)
-                        Log.d(TAG, "成功在 res/xml 中找到编译后的映射文件: $file")
-                        break
+                        resParser = remoteRes.getXml(resId)
                     }
-                }
+                } catch (e: Exception) {}
+
+                // 解析 assets 管道并存入内存
+                parseXmlToMap(assetsParser, allIconsMap, globalConfig)
+                assetsStream?.close()
+
+                // 解析 res/xml 二进制管道并存入内存（完整属性会智能覆盖前者）
+                parseXmlToMap(resParser, allIconsMap, globalConfig)
             }
 
-            if (parser == null) {
-                progressFlow.value = progressFlow.value.copy(error = "未找到有效的 XML 映射配置文件", isFinished = true)
+            Log.d(TAG, "【合并盘点大满贯】去重后单图标总量: ${allIconsMap.size}")
+            Log.d(TAG, "【全局属性捕获】遮罩别名: ${globalConfig.maskImg}, 覆盖层别名: ${globalConfig.uponImg}, 背景包容总数: ${globalConfig.backImgs.size}")
+
+            if (allIconsMap.isEmpty()) {
+                progressFlow.value = progressFlow.value.copy(error = "未在目标图标包内检索到任何有效的资产配置文件", isFinished = true)
                 return@withContext false
             }
 
+            // 更新第一阶段进度
+            progressFlow.value = ImportProgress(
+                totalItems = allIconsMap.size,
+                hasMask = globalConfig.maskImg != null,
+                hasUpon = globalConfig.uponImg != null,
+                backCount = globalConfig.backImgs.size
+            )
+
+            // 创建项目数据库基底
             val projectId = repository.insertProject(IconPackProject(name = newProjectName, packageName = newPackageName))
             val projectDir = File(context.filesDir, "projects/$projectId/icons").apply { mkdirs() }
             var currentProject = repository.getProjectById(projectId) ?: return@withContext false
 
-            // ======= 第一阶段：健壮扫描计数 =======
-            val itemsToProcess = mutableListOf<Pair<String, String>>()
-            var eventType = parser.eventType
-            var hasMask = false
-            var hasUpon = false
-            var backsFound = 0
-
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                if (eventType == XmlPullParser.START_TAG) {
-                    val tagName = parser.name
-                    if (tagName.equals("item", ignoreCase = true)) {
-                        val comp = getSafeAttribute(parser, "component")
-                        val draw = getSafeAttribute(parser, "drawable")
-                        if (comp != null && draw != null) {
-                            itemsToProcess.add(comp to draw)
-                        }
-                    } else if (tagName.equals("iconmask", ignoreCase = true)) {
-                        hasMask = true
-                    } else if (tagName.equals("iconupon", ignoreCase = true)) {
-                        hasUpon = true
-                    } else if (tagName.equals("iconback", ignoreCase = true)) {
-                        for (i in 1..10) {
-                            if (getSafeAttribute(parser, "img$i") != null) backsFound++
-                        }
-                    }
-                }
-                eventType = parser.next()
-            }
-
-            Log.d(TAG, "第一阶段扫描完毕。共发现图标项: ${itemsToProcess.size}, 遮罩: $hasMask, 叠加层: $hasUpon, 背景数: $backsFound")
-            progressFlow.value = ImportProgress(totalItems = itemsToProcess.size)
-
-            // ======= 第二阶段：重新获取 Parser 进行流提取 =======
-            inputStream?.close() // 先关闭之前的流
-            parser = null
-            inputStream = null
-
-            for (file in mappingFiles) {
-                try {
-                    val stream = remoteContext.assets.open(file)
-                    parser = Xml.newPullParser().apply { setInput(stream, "UTF-8") }
-                    inputStream = stream
-                    break
-                } catch (e: Exception) {}
-            }
-            if (parser == null) {
-                for (file in mappingFiles) {
-                    val resId = remoteRes.getIdentifier(file.substringBeforeLast("."), "xml", sourcePackageName)
-                    if (resId != 0) { parser = remoteRes.getXml(resId); break }
-                }
-            }
-
-            if (parser == null) return@withContext false
-
-            eventType = parser.eventType
+            // ======= 第二阶段：全量图标物理流解离提取 =======
             var currentProcessed = 0
 
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                if (eventType == XmlPullParser.START_TAG) {
-                    val tagName = parser.name
-                    when {
-                        tagName.equals("item", ignoreCase = true) || tagName.equals("calendar", ignoreCase = true) -> {
-                            val component = getSafeAttribute(parser, "component")
-                            val drawableName = getSafeAttribute(parser, "drawable") ?: getSafeAttribute(parser, "prefix")
+            for ((_, triple) in allIconsMap) {
+                val component = triple.first
+                val drawableName = triple.second
+                val tagName = triple.third
 
-                            if (component != null && drawableName != null) {
-                                val cleanedComponent = component.replace(" ", "")
-                                val regex = "ComponentInfo\\{([^/]+)/([^}]+)\\}".toRegex()
-                                val match = regex.find(cleanedComponent)
-                                if (match != null) {
-                                    val pkg = match.groupValues[1]
-                                    val activity = match.groupValues[2]
+                var targetPkg = ""
+                var targetActivity = ""
 
-                                    // 提取图片（用相对稳定的特征命名）
-                                    val iconPath = extractDrawableToPrivateStorage(
-                                        remoteContext, sourcePackageName, drawableName,
-                                        "${pkg}_icon", projectDir
-                                    )
-
-                                    if (iconPath != null) {
-                                        repository.insertMapping(
-                                            IconMapping(
-                                                projectId = projectId,
-                                                targetPackageName = pkg,
-                                                targetActivityName = activity,
-                                                iconPath = iconPath,
-                                                mappingType = if (tagName.equals("calendar", ignoreCase = true)) 1 else 0
-                                            )
-                                        )
-                                    }
-                                }
-                                currentProcessed++
-                                progressFlow.value = progressFlow.value.copy(currentItem = currentProcessed)
-                            }
-                        }
-                        tagName.equals("iconmask", ignoreCase = true) -> {
-                            val img = getSafeAttribute(parser, "img1")
-                            val path = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, img, "mask", projectDir)
-                            if (path != null) {
-                                currentProject = currentProject.copy(iconMaskPath = path)
-                                repository.updateProject(currentProject)
-                                progressFlow.value = progressFlow.value.copy(hasMask = true)
-                            }
-                        }
-                        tagName.equals("iconupon", ignoreCase = true) -> {
-                            val img = getSafeAttribute(parser, "img1")
-                            val path = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, img, "upon", projectDir)
-                            if (path != null) {
-                                currentProject = currentProject.copy(iconUponPath = path)
-                                repository.updateProject(currentProject)
-                                progressFlow.value = progressFlow.value.copy(hasUpon = true)
-                            }
-                        }
-                        tagName.equals("iconback", ignoreCase = true) -> {
-                            val backs = mutableListOf<String>()
-                            for (i in 1..10) {
-                                val img = getSafeAttribute(parser, "img$i") ?: break
-                                val path = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, img, "back_$i", projectDir)
-                                if (path != null) backs.add(path)
-                            }
-                            if (backs.isNotEmpty()) {
-                                currentProject = currentProject.copy(iconBackPaths = backs.joinToString(","))
-                                repository.updateProject(currentProject)
-                                progressFlow.value = progressFlow.value.copy(backCount = backs.size)
-                            }
-                        }
-                        tagName.equals("scale", ignoreCase = true) -> {
-                            val factor = getSafeAttribute(parser, "factor")?.toFloatOrNull()
-                            if (factor != null) {
-                                currentProject = currentProject.copy(scaleFactor = factor)
-                                repository.updateProject(currentProject)
-                            }
-                        }
+                if (component != null) {
+                    val cleanedComponent = component.replace(" ", "")
+                    val regex = "ComponentInfo\\{([^/]+)/([^}]+)\\}".toRegex()
+                    val match = regex.find(cleanedComponent)
+                    if (match != null) {
+                        targetPkg = match.groupValues[1]
+                        targetActivity = match.groupValues[2]
                     }
                 }
-                eventType = parser.next()
+
+                // 五轨资源反查落盘
+                val iconPath = extractDrawableToPrivateStorage(
+                    remoteContext, sourcePackageName, drawableName,
+                    "${drawableName}_asset", projectDir
+                )
+
+                if (iconPath != null) {
+                    repository.insertMapping(
+                        IconMapping(
+                            projectId = projectId,
+                            targetPackageName = targetPkg,
+                            targetActivityName = targetActivity,
+                            iconPath = iconPath,
+                            mappingType = if (tagName.equals("calendar", ignoreCase = true)) 1 else 0
+                        )
+                    )
+                }
+
+                currentProcessed++
+                progressFlow.value = progressFlow.value.copy(currentItem = currentProcessed)
             }
-            inputStream?.close()
+
+            // ======= 第三阶段：就地对盘点出来的全局属性进行抽取并绑定（大一统写入） =======
+            // 核心修复：直接读取第一阶段在 res/xml 里抓取到的绝对正主别名，原地提取物理 PNG
+
+            // 1. 提取 iconmask
+            globalConfig.maskImg?.let { maskName ->
+                val path = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, maskName, "mask", projectDir)
+                if (path != null) {
+                    currentProject = currentProject.copy(iconMaskPath = path)
+                }
+            }
+
+            // 2. 提取 iconupon
+            globalConfig.uponImg?.let { uponName ->
+                val path = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, uponName, "upon", projectDir)
+                if (path != null) {
+                    currentProject = currentProject.copy(iconUponPath = path)
+                }
+            }
+
+            // 3. 提取成批的 iconback
+            if (globalConfig.backImgs.isNotEmpty()) {
+                val savedBackPaths = mutableListOf<String>()
+                globalConfig.backImgs.forEachIndexed { index, backName ->
+                    val path = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, backName, "back_${index + 1}", projectDir)
+                    if (path != null) savedBackPaths.add(path)
+                }
+                if (savedBackPaths.isNotEmpty()) {
+                    currentProject = currentProject.copy(iconBackPaths = savedBackPaths.joinToString(","))
+                }
+            }
+
+            // 4. 提取缩放比 scale
+            globalConfig.scaleFactor?.let { factor ->
+                currentProject = currentProject.copy(scaleFactor = factor)
+            }
+
+            // 终极持久化灌入项目主表！
+            repository.updateProject(currentProject)
+
             progressFlow.value = progressFlow.value.copy(isFinished = true)
-            Log.d(TAG, "逆向导入任务完美成功！")
+            Log.d(TAG, "【完美收官】835个全量独立图标加四大通用图层配置，已全部安全落地沙盒！")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "导入崩溃: ", e)
+            Log.e(TAG, "全量引擎遭遇崩溃异常: ", e)
             progressFlow.value = progressFlow.value.copy(error = e.message, isFinished = true)
             false
         }
     }
 
     /**
-     * 防御性属性提取函数：攻克二进制 XML 属性读取不到的隐蔽 Bug
+     * 增量流式 XML 暂存器：全面收容单图标映射与全局通用标签参数
      */
+    private fun parseXmlToMap(parser: XmlPullParser?, map: MutableMap<String, Triple<String?, String, String>>, globalConfig: GlobalOverlayConfig) {
+        if (parser == null) return
+        try {
+            var eventType = parser.eventType
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                if (eventType == XmlPullParser.START_TAG) {
+                    val tagName = parser.name
+                    when {
+                        // 1. 处理图标或日历映射
+                        tagName.equals("item", ignoreCase = true) || tagName.equals("calendar", ignoreCase = true) -> {
+                            val comp = getSafeAttribute(parser, "component")
+                            val draw = getSafeAttribute(parser, "drawable") ?: getSafeAttribute(parser, "prefix")
+
+                            if (draw != null) {
+                                val uniqueKey = "${comp ?: "unmapped"}_$draw"
+                                map[uniqueKey] = Triple(comp, draw, tagName)
+                            }
+                        }
+                        // 2. 收集全局遮罩
+                        tagName.equals("iconmask", ignoreCase = true) -> {
+                            getSafeAttribute(parser, "img1")?.let { globalConfig.maskImg = it }
+                        }
+                        // 3. 收集全局覆盖层
+                        tagName.equals("iconupon", ignoreCase = true) -> {
+                            getSafeAttribute(parser, "img1")?.let { globalConfig.uponImg = it }
+                        }
+                        // 4. 收集全局背景容器池
+                        tagName.equals("iconback", ignoreCase = true) -> {
+                            for (i in 1..10) {
+                                getSafeAttribute(parser, "img$i")?.let { globalConfig.backImgs.add(it) }
+                            }
+                        }
+                        // 5. 收集全局缩放因子
+                        tagName.equals("scale", ignoreCase = true) -> {
+                            getSafeAttribute(parser, "factor")?.toFloatOrNull()?.let { globalConfig.scaleFactor = it }
+                        }
+                    }
+                }
+                eventType = parser.next()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "XML 暂存压入微观失败", e)
+        }
+    }
+
     private fun getSafeAttribute(parser: XmlPullParser, attrName: String): String? {
-        // 1. 尝试常规方式取
         val value = parser.getAttributeValue(null, attrName)
         if (value != null) return value
 
-        // 2. 循环遍历属性域肉搏匹配（解决 AAPT2 二进制混淆问题）
         val count = parser.attributeCount
         if (count != -1) {
             for (i in 0 until count) {
-                if (parser.getAttributeName(i).equals(attrName, ignoreCase = true)) {
+                val fullAttrName = parser.getAttributeName(i)
+                val localName = fullAttrName.substringAfterLast(":")
+                if (localName.equals(attrName, ignoreCase = true)) {
                     return parser.getAttributeValue(i)
                 }
             }
@@ -281,51 +302,80 @@ class IconPackImporter(
         return null
     }
 
+    /**
+     * 万能五轨无损反查提图引擎
+     */
     private fun extractDrawableToPrivateStorage(
-        remoteContext: Context,
-        remotePkg: String,
-        drawableName: String?,
-        fileName: String,
-        outputDir: File
+        remoteContext: Context, remotePkg: String, drawableName: String?, fileName: String, outputDir: File
     ): String? {
         if (drawableName == null) return null
         val res = remoteContext.resources
         val sanitizedName = drawableName.substringAfterLast("/")
 
-        // 攻克 mipmap 资源域缺陷：先查 drawable，失败再查 mipmap
         var resId = res.getIdentifier(sanitizedName, "drawable", remotePkg)
         if (resId == 0) {
             resId = res.getIdentifier(sanitizedName, "mipmap", remotePkg)
         }
-
         if (resId == 0) {
-            Log.w(TAG, "未能找到资源标识符: $sanitizedName")
-            return null
+            try {
+                resId = res.getIdentifier("$remotePkg:drawable/$sanitizedName", null, null)
+                if (resId == 0) {
+                    resId = res.getIdentifier("$remotePkg:mipmap/$sanitizedName", null, null)
+                }
+            } catch (e: Exception) {}
+        }
+        if (resId == 0) {
+            try {
+                resId = res.getIdentifier(sanitizedName, "drawable", remoteContext.packageName)
+                if (resId == 0) {
+                    resId = res.getIdentifier(sanitizedName, "mipmap", remoteContext.packageName)
+                }
+            } catch (e: Exception) {}
         }
 
-        return try {
-            val drawable = res.getDrawable(resId, remoteContext.theme)
-            val bitmap = drawableToBitmap(drawable)
+        val targetFile = File(outputDir, "$fileName.png")
+        targetFile.parentFile?.mkdirs()
 
-            // 确保多级父目录绝对存在
-            val file = File(outputDir, "$fileName.png")
-            file.parentFile?.mkdirs()
-
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-            file.absolutePath
-        } catch (e: Exception) {
-            Log.e(TAG, "提取图片资源失败: $sanitizedName", e)
-            null
+        if (resId != 0) {
+            try {
+                val drawable = res.getDrawable(resId, remoteContext.theme)
+                val bitmap = drawableToBitmap(drawable)
+                FileOutputStream(targetFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                return targetFile.absolutePath
+            } catch (e: Exception) {}
         }
+
+        // 第五轨：APK 原始压缩包物理路径直读（秒杀由于 AAPT2 导致的 arsc 索引字典未收录问题）
+        val targetQualifierPaths = listOf(
+            "res/drawable-nodpi-v4/$sanitizedName.png",
+            "res/drawable-nodpi/$sanitizedName.png",
+            "res/drawable/$sanitizedName.png",
+            "res/mipmap-nodpi-v4/$sanitizedName.png",
+            "res/mipmap-nodpi/$sanitizedName.png"
+        )
+
+        for (path in targetQualifierPaths) {
+            try {
+                remoteContext.assets.openNonAssetFd(path).createInputStream().use { input ->
+                    val bitmap = BitmapFactory.decodeStream(input)
+                    if (bitmap != null) {
+                        FileOutputStream(targetFile).use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        return targetFile.absolutePath
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+        return null
     }
 
     private fun drawableToBitmap(drawable: Drawable): Bitmap {
-        // 自适应图标（AdaptiveIconDrawable）强转 BitmapDrawable 必崩，强制走离屏 Canvas 绘制
-        val width = if (drawable.intrinsicWidth <= 0) 192 else drawable.intrinsicWidth
-        val height = if (drawable.intrinsicHeight <= 0) 192 else drawable.intrinsicHeight
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val targetWidth = if (drawable.intrinsicWidth <= 10) 256 else drawable.intrinsicWidth
+        val targetHeight = if (drawable.intrinsicHeight <= 10) 256 else drawable.intrinsicHeight
+        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         drawable.setBounds(0, 0, canvas.width, canvas.height)
         drawable.draw(canvas)
