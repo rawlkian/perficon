@@ -10,6 +10,8 @@ data class IconPackProject(
     val packageName: String,
     val description: String = "",
     val projectIconPath: String? = null,
+    val useDynamicCalendar: Boolean = true,
+    val useDynamicClock: Boolean = true,
     
     // Masking and styling for uncovered apps
     val iconMaskPath: String? = null,

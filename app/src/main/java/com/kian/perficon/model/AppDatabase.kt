@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [IconPackProject::class, IconMapping::class], version = 6)
+@Database(entities = [IconPackProject::class, IconMapping::class], version = 7)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun iconPackDao(): IconPackDao
 
@@ -26,6 +26,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE icon_pack_projects ADD COLUMN useDynamicCalendar INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE icon_pack_projects ADD COLUMN useDynamicClock INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -36,7 +43,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "perficon_database"
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

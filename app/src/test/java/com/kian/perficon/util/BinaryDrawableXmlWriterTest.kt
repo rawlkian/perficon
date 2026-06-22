@@ -35,4 +35,38 @@ class BinaryDrawableXmlWriterTest {
             .resolve("drawable.xml")
             .writeBytes(xml)
     }
+
+    @Test
+    fun separatesDynamicIconsIntoDashboardCategories() {
+        val calendar = IconMapping(
+            projectId = 1,
+            iconName = "我的日历",
+            targetPackageName = "com.example.calendar",
+            targetActivityName = "com.example.calendar.MainActivity",
+            iconPath = "/unused/calendar.png",
+            mappingType = 1
+        )
+        val clock = IconMapping(
+            projectId = 1,
+            iconName = "我的时钟",
+            targetPackageName = "com.example.clock",
+            targetActivityName = "com.example.clock.MainActivity",
+            iconPath = "/unused/clock.png",
+            mappingType = 2
+        )
+
+        val content = BinaryDrawableXmlWriter.build(
+            staticMappings = emptyList(),
+            staticSlotIndices = emptyList(),
+            calendarMappings = listOf(calendar),
+            calendarSlotIndices = listOf(1),
+            clockMappings = listOf(clock),
+            clockSlotIndices = listOf(2)
+        ).decodeToString()
+
+        assertTrue(content.contains("动态日历"))
+        assertTrue(content.contains("我的日历"))
+        assertTrue(content.contains("动态时钟"))
+        assertTrue(content.contains("我的时钟"))
+    }
 }

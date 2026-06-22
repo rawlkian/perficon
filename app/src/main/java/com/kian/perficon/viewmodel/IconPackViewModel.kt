@@ -136,6 +136,10 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
             )
         }
 
+    fun insertMapping(mapping: IconMapping) = viewModelScope.launch {
+        repository.insertMapping(mapping)
+    }
+
     fun updateProject(project: IconPackProject) = viewModelScope.launch {
         repository.updateProject(project)
     }

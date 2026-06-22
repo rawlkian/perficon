@@ -16,20 +16,58 @@ object BinaryAppFilterWriter {
     private const val NO_INDEX = -1
     private const val TYPE_STRING = 0x03
 
-    fun build(mappings: List<IconMapping>, slotIndices: List<Int>): ByteArray {
-        require(mappings.size == slotIndices.size) { "Mappings and template slots must match." }
+    fun build(mappings: List<IconMapping>, slotIndices: List<Int>): ByteArray = build(
+        staticMappings = mappings,
+        staticSlotIndices = slotIndices
+    )
 
-        val strings = linkedSetOf("resources", "item", "component", "drawable")
-        mappings.zip(slotIndices).forEach { (mapping, slotIndex) ->
+    fun build(
+        staticMappings: List<IconMapping>,
+        staticSlotIndices: List<Int>,
+        calendarMappings: List<IconMapping> = emptyList(),
+        calendarSlotIndices: List<Int> = emptyList(),
+        clockMappings: List<IconMapping> = emptyList(),
+        clockSlotIndices: List<Int> = emptyList(),
+        scaleFactor: Float? = null
+    ): ByteArray {
+        require(staticMappings.size == staticSlotIndices.size) { "Static mappings and template slots must match." }
+        require(calendarMappings.size == calendarSlotIndices.size) { "Calendar mappings and template slots must match." }
+        require(clockMappings.size == clockSlotIndices.size) { "Clock mappings and template slots must match." }
+
+        val strings = linkedSetOf(
+            "resources", "item", "calendar", "dynamic-clock", "scale",
+            "component", "drawable", "prefix", "factor",
+            "defaultHour", "defaultMinute", "defaultSecond",
+            "hourLayerIndex", "minuteLayerIndex", "secondLayerIndex",
+            "10", "30", "1", "2", "3"
+        )
+        staticMappings.zip(staticSlotIndices).forEach { (mapping, slotIndex) ->
             strings += componentName(mapping)
             strings += "icon_$slotIndex"
         }
+        calendarMappings.zip(calendarSlotIndices).forEach { (mapping, slotIndex) ->
+            strings += componentName(mapping)
+            strings += "calendar_${slotIndex}_"
+            strings += "calendar_${slotIndex}_1"
+        }
+        clockMappings.zip(clockSlotIndices).forEach { (mapping, slotIndex) ->
+            strings += componentName(mapping)
+            strings += "clock_dynamic_$slotIndex"
+        }
+        scaleFactor?.let { strings += it.toString() }
         val allStrings = strings.toList()
         val indexes = allStrings.withIndex().associate { it.value to it.index }
 
         val body = ByteArrayOutputStream().apply {
             writeStartElement(indexes.getValue("resources"), emptyList())
-            mappings.zip(slotIndices).forEach { (mapping, slotIndex) ->
+            scaleFactor?.let { factor ->
+                writeStartElement(
+                    indexes.getValue("scale"),
+                    listOf(indexes.getValue("factor") to indexes.getValue(factor.toString()))
+                )
+                writeEndElement(indexes.getValue("scale"))
+            }
+            staticMappings.zip(staticSlotIndices).forEach { (mapping, slotIndex) ->
                 writeStartElement(
                     indexes.getValue("item"),
                     listOf(
@@ -38,6 +76,51 @@ object BinaryAppFilterWriter {
                     )
                 )
                 writeEndElement(indexes.getValue("item"))
+            }
+            calendarMappings.zip(calendarSlotIndices).forEach { (mapping, slotIndex) ->
+                writeStartElement(
+                    indexes.getValue("item"),
+                    listOf(
+                        indexes.getValue("component") to indexes.getValue(componentName(mapping)),
+                        indexes.getValue("drawable") to indexes.getValue("calendar_${slotIndex}_1")
+                    )
+                )
+                writeEndElement(indexes.getValue("item"))
+                writeStartElement(
+                    indexes.getValue("calendar"),
+                    listOf(
+                        indexes.getValue("component") to indexes.getValue(componentName(mapping)),
+                        indexes.getValue("prefix") to indexes.getValue("calendar_${slotIndex}_")
+                    )
+                )
+                writeEndElement(indexes.getValue("calendar"))
+            }
+            val declaredClockDrawables = mutableSetOf<String>()
+            clockMappings.zip(clockSlotIndices).forEach { (mapping, slotIndex) ->
+                val drawable = "clock_dynamic_$slotIndex"
+                writeStartElement(
+                    indexes.getValue("item"),
+                    listOf(
+                        indexes.getValue("component") to indexes.getValue(componentName(mapping)),
+                        indexes.getValue("drawable") to indexes.getValue(drawable)
+                    )
+                )
+                writeEndElement(indexes.getValue("item"))
+                if (declaredClockDrawables.add(drawable)) {
+                    writeStartElement(
+                        indexes.getValue("dynamic-clock"),
+                        listOf(
+                            indexes.getValue("drawable") to indexes.getValue(drawable),
+                            indexes.getValue("defaultHour") to indexes.getValue("10"),
+                            indexes.getValue("defaultMinute") to indexes.getValue("10"),
+                            indexes.getValue("defaultSecond") to indexes.getValue("30"),
+                            indexes.getValue("hourLayerIndex") to indexes.getValue("1"),
+                            indexes.getValue("minuteLayerIndex") to indexes.getValue("2"),
+                            indexes.getValue("secondLayerIndex") to indexes.getValue("3")
+                        )
+                    )
+                    writeEndElement(indexes.getValue("dynamic-clock"))
+                }
             }
             writeEndElement(indexes.getValue("resources"))
         }.toByteArray()

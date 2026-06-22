@@ -17,15 +17,37 @@ object BinaryDrawableXmlWriter {
     private const val NO_INDEX = -1
     private const val TYPE_STRING = 0x03
 
-    fun build(mappings: List<IconMapping>, slotIndices: List<Int>): ByteArray {
-        require(mappings.size == slotIndices.size) { "Mappings and template slots must match." }
+    fun build(mappings: List<IconMapping>, slotIndices: List<Int>): ByteArray = build(
+        staticMappings = mappings,
+        staticSlotIndices = slotIndices
+    )
+
+    fun build(
+        staticMappings: List<IconMapping>,
+        staticSlotIndices: List<Int>,
+        calendarMappings: List<IconMapping> = emptyList(),
+        calendarSlotIndices: List<Int> = emptyList(),
+        clockMappings: List<IconMapping> = emptyList(),
+        clockSlotIndices: List<Int> = emptyList()
+    ): ByteArray {
+        require(staticMappings.size == staticSlotIndices.size) { "Static mappings and template slots must match." }
+        require(calendarMappings.size == calendarSlotIndices.size) { "Calendar mappings and template slots must match." }
+        require(clockMappings.size == clockSlotIndices.size) { "Clock mappings and template slots must match." }
+
+        val categories = buildList {
+            add(Category("全部图标", staticMappings.zip(staticSlotIndices).map { (mapping, slot) -> Entry(mapping, "icon_$slot") }))
+            add(Category("动态日历", calendarMappings.zip(calendarSlotIndices).map { (mapping, slot) -> Entry(mapping, "calendar_${slot}_1") }))
+            add(Category("动态时钟", clockMappings.zip(clockSlotIndices).map { (mapping, slot) -> Entry(mapping, "clock_dynamic_$slot") }))
+        }.filter { it.entries.isNotEmpty() }
 
         val strings = linkedSetOf(
-            "resources", "version", "category", "item", "title", "drawable", "name", "1", "全部图标"
+            "resources", "version", "category", "item", "title", "drawable", "name", "1", "全部图标", "动态日历", "动态时钟"
         )
-        mappings.zip(slotIndices).forEach { (mapping, slotIndex) ->
-            strings += "icon_$slotIndex"
-            strings += mapping.iconName.ifBlank { mapping.targetPackageName }
+        categories.forEach { category ->
+            category.entries.forEach { entry ->
+                strings += entry.drawable
+                strings += entry.mapping.iconName.ifBlank { entry.mapping.targetPackageName }
+            }
         }
         val allStrings = strings.toList()
         val indexes = allStrings.withIndex().associate { it.value to it.index }
@@ -35,18 +57,20 @@ object BinaryDrawableXmlWriter {
             writeStart(indexes.getValue("version"), emptyList())
             writeCData(indexes.getValue("1"))
             writeEnd(indexes.getValue("version"))
-            writeStart(indexes.getValue("category"), listOf(indexes.getValue("title") to indexes.getValue("全部图标")))
-            mappings.zip(slotIndices).forEach { (mapping, slotIndex) ->
+            categories.forEach { category ->
+                writeStart(indexes.getValue("category"), listOf(indexes.getValue("title") to indexes.getValue(category.title)))
+                category.entries.forEach { entry ->
                 writeStart(
                     indexes.getValue("item"),
                     listOf(
-                        indexes.getValue("drawable") to indexes.getValue("icon_$slotIndex"),
-                        indexes.getValue("name") to indexes.getValue(mapping.iconName.ifBlank { mapping.targetPackageName })
+                            indexes.getValue("drawable") to indexes.getValue(entry.drawable),
+                            indexes.getValue("name") to indexes.getValue(entry.mapping.iconName.ifBlank { entry.mapping.targetPackageName })
                     )
                 )
                 writeEnd(indexes.getValue("item"))
+                }
+                writeEnd(indexes.getValue("category"))
             }
-            writeEnd(indexes.getValue("category"))
             writeEnd(indexes.getValue("resources"))
         }.toByteArray()
         val stringPool = buildStringPool(allStrings)
@@ -65,6 +89,10 @@ object BinaryDrawableXmlWriter {
             }
             .array()
     }
+
+    private data class Category(val title: String, val entries: List<Entry>)
+
+    private data class Entry(val mapping: IconMapping, val drawable: String)
 
     private fun buildStringPool(strings: List<String>): ByteArray {
         val data = ByteArrayOutputStream()

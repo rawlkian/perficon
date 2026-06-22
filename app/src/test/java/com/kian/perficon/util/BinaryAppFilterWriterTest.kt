@@ -28,4 +28,36 @@ class BinaryAppFilterWriterTest {
             .resolve("appfilter.xml")
             .writeBytes(xml)
     }
+
+    @Test
+    fun writesCalendarPrefixesAndClockLayerMetadata() {
+        val calendar = IconMapping(
+            projectId = 1,
+            targetPackageName = "com.example.calendar",
+            targetActivityName = "com.example.calendar.MainActivity",
+            iconPath = "/unused/calendar.png",
+            mappingType = 1
+        )
+        val clock = IconMapping(
+            projectId = 1,
+            targetPackageName = "com.example.clock",
+            targetActivityName = "com.example.clock.MainActivity",
+            iconPath = "/unused/clock.png",
+            mappingType = 2
+        )
+
+        val content = BinaryAppFilterWriter.build(
+            staticMappings = emptyList(),
+            staticSlotIndices = emptyList(),
+            calendarMappings = listOf(calendar),
+            calendarSlotIndices = listOf(1),
+            clockMappings = listOf(clock),
+            clockSlotIndices = listOf(2),
+            scaleFactor = 1f
+        ).decodeToString()
+
+        assertTrue(content.contains("calendar_1_"))
+        assertTrue(content.contains("clock_dynamic_2"))
+        assertTrue(content.contains("hourLayerIndex"))
+    }
 }

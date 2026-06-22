@@ -49,6 +49,8 @@ import com.kian.perficon.model.IconPackProject
 import com.kian.perficon.ui.components.VerticalScrollbar
 import com.kian.perficon.util.AppInfo
 import com.kian.perficon.util.ApkGenerator
+import com.kian.perficon.util.DynamicIconAssets
+import com.kian.perficon.util.DynamicIconDefaults
 import com.kian.perficon.util.IconPackExporter
 import com.kian.perficon.util.saveIconToInternalStorage
 import com.kian.perficon.util.exportFileToDownloads
@@ -64,8 +66,45 @@ private data class NewIconInput(
     val targetActivityName: String
 )
 
+private data class CalendarFrameTarget(
+    val mapping: IconMapping,
+    val day: Int
+)
+
+private data class ClockLayerTarget(
+    val mapping: IconMapping,
+    val layer: DynamicIconAssets.ClockLayer
+)
+
+private enum class CalendarFrameAction {
+    Gallery,
+    File,
+    Reset
+}
+
+private enum class ClockLayerAction {
+    Gallery,
+    File,
+    Reset
+}
+
 private fun defaultActivityName(packageName: String): String =
     packageName.trim().takeIf(String::isNotEmpty)?.let { "$it.MainActivity" }.orEmpty()
+
+private fun hasPackageConflict(
+    packageName: String,
+    mappingType: Int,
+    mappings: List<IconMapping>,
+    excludedMappingId: Long? = null
+): Boolean {
+    if (packageName.isBlank()) return false
+    val isDynamic = mappingType != 0
+    return mappings.any { existing ->
+        existing.id != excludedMappingId &&
+            existing.targetPackageName == packageName &&
+            (if (isDynamic) existing.mappingType != 0 else existing.mappingType == 0)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,17 +127,58 @@ fun ProjectEditorScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var showStatsDialog by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showProjectEditDialog by remember { mutableStateOf(false) }
+    var showExportConfirmation by remember { mutableStateOf(false) }
+    var showDynamicTypePicker by remember { mutableStateOf(false) }
+    var showDefaultCalendarConfirmation by remember { mutableStateOf(false) }
+    var isCreatingDefaultCalendar by remember { mutableStateOf(false) }
+    var calendarToDelete by remember { mutableStateOf<IconMapping?>(null) }
+    var calendarFrameTarget by remember { mutableStateOf<CalendarFrameTarget?>(null) }
+    var showDefaultClockConfirmation by remember { mutableStateOf(false) }
+    var isCreatingDefaultClock by remember { mutableStateOf(false) }
+    var clockToDelete by remember { mutableStateOf<IconMapping?>(null) }
+    var clockLayerTarget by remember { mutableStateOf<ClockLayerTarget?>(null) }
+    var showCalendarEditor by remember { mutableStateOf(false) }
+    var showClockEditor by remember { mutableStateOf(false) }
+    var calendarMappingToEdit by remember { mutableStateOf<IconMapping?>(null) }
+    var clockMappingToEdit by remember { mutableStateOf<IconMapping?>(null) }
     var exportProgress by remember { mutableStateOf<ApkGenerator.Progress?>(null) }
     var completedApk by remember { mutableStateOf<File?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val dynamicCalendarEnabled = project?.useDynamicCalendar == true
+    val dynamicClockEnabled = project?.useDynamicClock == true
+    val hasDynamicCalendar = mappings.any { it.mappingType == 1 }
+    val hasDynamicClock = mappings.any { it.mappingType == 2 }
+    val canAddDynamicCalendar = dynamicCalendarEnabled && !hasDynamicCalendar && !isCreatingDefaultCalendar
+    val canAddDynamicClock = dynamicClockEnabled && !hasDynamicClock && !isCreatingDefaultClock
+    val visibleTabs = buildList {
+        add(0)
+        if (dynamicCalendarEnabled || dynamicClockEnabled) add(1)
+        add(2)
+    }
 
-    val displayMappings = remember(mappings, selectedTab, isSearchActive, searchQuery, searchMode) {
-        val type = when(selectedTab) {
-            1 -> listOf(1, 2)
-            else -> listOf(0)
+    LaunchedEffect(dynamicCalendarEnabled, dynamicClockEnabled) {
+        if (selectedTab == 1 && 1 !in visibleTabs) selectedTab = 0
+    }
+
+    val displayMappings = remember(mappings, selectedTab, isSearchActive, searchQuery, searchMode, dynamicCalendarEnabled, dynamicClockEnabled) {
+        val type = when (selectedTab) {
+            1 -> buildList {
+                if (dynamicCalendarEnabled) add(1)
+                if (dynamicClockEnabled) add(2)
+            }
+            else -> buildList {
+                add(0)
+                if (!dynamicCalendarEnabled) add(1)
+                if (!dynamicClockEnabled) add(2)
+            }
         }
         val baseList = mappings.filter { it.mappingType in type }
-        val distinctList = if (selectedTab == 0) baseList.distinctBy { it.targetPackageName } else baseList
+        val distinctList = if (selectedTab == 0) {
+            baseList.groupBy { it.targetPackageName }
+                .values
+                .map { alternatives -> alternatives.firstOrNull { it.mappingType == 0 } ?: alternatives.first() }
+        } else baseList
         
         if (!isSearchActive || searchQuery.isEmpty()) distinctList
         else {
@@ -134,10 +214,44 @@ fun ProjectEditorScreen(
         mappingToChangeIcon = null
     }
 
+    val calendarFrameLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val target = calendarFrameTarget
+        if (uri != null && target != null) {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    DynamicIconAssets.saveAsset(context, uri, projectId, "calendar_custom_${target.day}")
+                }
+                if (path == null) {
+                    Toast.makeText(context, "无法保存日期图标", Toast.LENGTH_SHORT).show()
+                } else {
+                    viewModel.updateMapping(DynamicIconAssets.withCalendarFrame(target.mapping, target.day, path))
+                }
+            }
+        }
+        calendarFrameTarget = null
+    }
+
+    val clockLayerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val target = clockLayerTarget
+        if (uri != null && target != null) {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    DynamicIconAssets.saveAsset(context, uri, projectId, "clock_custom_${target.layer.resourceName}")
+                }
+                if (path == null) {
+                    Toast.makeText(context, "无法保存时钟图层", Toast.LENGTH_SHORT).show()
+                } else {
+                    viewModel.updateMapping(DynamicIconAssets.withClockLayer(target.mapping, target.layer, path))
+                }
+            }
+        }
+        clockLayerTarget = null
+    }
+
     fun buildAndShareApk() {
         scope.launch {
             val p = project ?: return@launch
-            exportProgress = ApkGenerator.Progress(0, "正在启动Build")
+            exportProgress = ApkGenerator.Progress(0, "正在启动构建")
             try {
                 val safeFileName = p.name.replace("[^a-zA-Z0-9]".toRegex(), "_") + ".apk"
                 val apkFile = withContext(Dispatchers.IO) {
@@ -149,7 +263,7 @@ fun ProjectEditorScreen(
                 }
                 completedApk = apkFile
             } catch (e: Exception) {
-                Toast.makeText(context, e.message ?: "APK Build失败。", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, e.message ?: "APK 构建失败。", Toast.LENGTH_LONG).show()
             } finally {
                 exportProgress = null
             }
@@ -160,14 +274,17 @@ fun ProjectEditorScreen(
         topBar = {
             if (isSearchActive && !isSearchOverlayVisible) {
                 CenterAlignedTopAppBar(
-                    title = { Text("Search结果") },
+                    title = { Text("搜索结果") },
                     navigationIcon = { IconButton(onClick = { isSearchActive = false; searchQuery = "" }) { Icon(Icons.Default.ArrowBack, null) } }
                 )
             } else {
                 CenterAlignedTopAppBar(
                     title = { Text(project?.name ?: "编辑器") },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
-                    actions = { IconButton(onClick = { buildAndShareApk() }) { Icon(Icons.Default.Build, "导出") } }
+                    actions = {
+                        IconButton(onClick = { showProjectEditDialog = true }) { Icon(Icons.Default.Edit, "编辑项目") }
+                        IconButton(onClick = { showExportConfirmation = true }) { Icon(Icons.Default.Build, "导出") }
+                    }
                 )
             }
         },
@@ -180,37 +297,151 @@ fun ProjectEditorScreen(
                         contentColor = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 16.dp, end = 16.dp)
                     ) { Icon(Icons.Default.Close, null) }
-                } else if (selectedTab != 2) {
+                } else if (selectedTab == 0) {
                     FabMenu({ showAddDialog = true }, { isSearchOverlayVisible = true }, { showStatsDialog = true })
+                } else if (selectedTab == 1) {
+                    FabMenu(
+                        onAdd = { showDynamicTypePicker = true },
+                        onSearch = { isSearchOverlayVisible = true },
+                        onStats = { showStatsDialog = true },
+                        showAdd = canAddDynamicCalendar || canAddDynamicClock
+                    )
                 }
             }
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
-            TabRow(selectedTabIndex = selectedTab) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) { Text("图标映射", Modifier.padding(12.dp)) }
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) { Text("动态", Modifier.padding(12.dp)) }
-                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }) { Text("样式", Modifier.padding(12.dp)) }
+            TabRow(selectedTabIndex = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)) {
+                visibleTabs.forEach { tab ->
+                    val title = when (tab) {
+                        0 -> "图标映射"
+                        1 -> "动态"
+                        else -> "样式"
+                    }
+                    Tab(selected = selectedTab == tab, onClick = { selectedTab = tab }) { Text(title, Modifier.padding(12.dp)) }
+                }
             }
 
             if (isSearchActive && searchQuery.isNotEmpty()) {
                 Surface(color = MaterialTheme.colorScheme.secondaryContainer.copy(0.5f), modifier = Modifier.fillMaxWidth()) {
-                    Text("正在Search \"$searchQuery\"", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
+                    Text("正在搜索 \"$searchQuery\"", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
                 }
             }
 
             when (selectedTab) {
-                0 -> MappingGridWithScrollbar(displayMappings, { mappingToEditPkg = it }, { mappingToChangeIcon = it }, { mappingToDuplicate = it }, { viewModel.deleteMapping(it) }) { mapping ->
+                0 -> MappingGridWithScrollbar(displayMappings, { mappingToEditPkg = it }, { mappingToChangeIcon = it }, { mappingToDuplicate = it }, { viewModel.deleteMapping(it) }, { mappingToChangeIcon = it }, false) { mapping ->
                     project?.let { viewModel.updateProject(it.copy(projectIconPath = mapping.iconPath)) }
                 }
-                1 -> DynamicTabContent(displayMappings, { mappingToEditPkg = it }, { mappingToChangeIcon = it }, { mappingToDuplicate = it }, { viewModel.deleteMapping(it) }) { mapping ->
-                    project?.let { viewModel.updateProject(it.copy(projectIconPath = mapping.iconPath)) }
-                }
+                1 -> DynamicTabContent(
+                    mappings = displayMappings,
+                    showCalendar = dynamicCalendarEnabled,
+                    showClock = dynamicClockEnabled,
+                    onEdit = { mappingToEditPkg = it },
+                    onChangeIcon = { mappingToChangeIcon = it },
+                    onDuplicate = { mappingToDuplicate = it },
+                    onDelete = { viewModel.deleteMapping(it) },
+                    onEditDynamic = {},
+                    onCalendarFrameAction = { mapping, day, action ->
+                        when (action) {
+                            CalendarFrameAction.Gallery -> {
+                                calendarFrameTarget = CalendarFrameTarget(mapping, day)
+                                calendarFrameLauncher.launch("image/*")
+                            }
+                            CalendarFrameAction.File -> {
+                                calendarFrameTarget = CalendarFrameTarget(mapping, day)
+                                calendarFrameLauncher.launch("*/*")
+                            }
+                            CalendarFrameAction.Reset -> {
+                                scope.launch {
+                                    val path = withContext(Dispatchers.IO) {
+                                        DynamicIconAssets.restoreDefaultCalendarFrame(context, projectId, day)
+                                    }
+                                    if (path == null) {
+                                        Toast.makeText(context, "无法恢复缺省日期图标", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.updateMapping(DynamicIconAssets.withCalendarFrame(mapping, day, path))
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onDeleteCalendar = { calendarToDelete = it },
+                    onClockLayerAction = { mapping, layer, action ->
+                        when (action) {
+                            ClockLayerAction.Gallery -> {
+                                clockLayerTarget = ClockLayerTarget(mapping, layer)
+                                clockLayerLauncher.launch("image/*")
+                            }
+                            ClockLayerAction.File -> {
+                                clockLayerTarget = ClockLayerTarget(mapping, layer)
+                                clockLayerLauncher.launch("*/*")
+                            }
+                            ClockLayerAction.Reset -> {
+                                scope.launch {
+                                    val path = withContext(Dispatchers.IO) {
+                                        DynamicIconAssets.restoreDefaultClockLayer(context, projectId, layer)
+                                    }
+                                    if (path == null) {
+                                        Toast.makeText(context, "无法恢复缺省时钟图层", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.updateMapping(DynamicIconAssets.withClockLayer(mapping, layer, path))
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onDeleteClock = { clockToDelete = it },
+                    onSetProjectIcon = { mapping ->
+                        project?.let { viewModel.updateProject(it.copy(projectIconPath = mapping.iconPath)) }
+                    }
+                )
                 2 -> GlobalSettings(project, { viewModel.updateProject(it) })
             }
         }
 
         if (isSearchOverlayVisible) SearchOverlay(searchQuery, searchMode, { searchQuery = it }, { searchMode = it }, { isSearchActive = true; isSearchOverlayVisible = false }, { isSearchOverlayVisible = false })
+
+        if (showProjectEditDialog && project != null) {
+            val currentProject = project!!
+                AddProjectDialog(
+                    title = "编辑项目",
+                    initialName = currentProject.name,
+                    initialPkg = currentProject.packageName,
+                    initialIconPath = currentProject.projectIconPath,
+                    showDynamicOptions = true,
+                    initialUseDynamicCalendar = currentProject.useDynamicCalendar,
+                    initialUseDynamicClock = currentProject.useDynamicClock,
+                    confirmLabel = "保存",
+                    onDismiss = { showProjectEditDialog = false },
+                    onConfirm = { name, packageName, iconPath, useCalendar, useClock ->
+                        viewModel.updateProject(
+                            currentProject.copy(
+                                name = name,
+                                packageName = packageName,
+                                projectIconPath = iconPath,
+                                useDynamicCalendar = useCalendar,
+                                useDynamicClock = useClock
+                            )
+                        )
+                        showProjectEditDialog = false
+                    }
+                )
+        }
+
+        if (showExportConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showExportConfirmation = false },
+                title = { Text("确认导出") },
+                text = { Text("将根据当前项目设置生成并签名图标包 APK。") },
+                confirmButton = {
+                    Button(onClick = {
+                        showExportConfirmation = false
+                        buildAndShareApk()
+                    }) { Text("开始导出") }
+                },
+                dismissButton = { TextButton(onClick = { showExportConfirmation = false }) { Text("取消") } }
+            )
+        }
         
         if (showAddDialog) {
             AddIconDialog(
@@ -287,6 +518,168 @@ fun ProjectEditorScreen(
             ExportProgressDialog(progress)
         }
 
+        if (showDynamicTypePicker) {
+            DynamicTypePickerDialog(
+                showCalendar = canAddDynamicCalendar,
+                showClock = canAddDynamicClock,
+                onDismiss = { showDynamicTypePicker = false },
+                onCalendar = { showDefaultCalendarConfirmation = true; showDynamicTypePicker = false },
+                onClock = { showDefaultClockConfirmation = true; showDynamicTypePicker = false }
+            )
+        }
+
+        if (showDefaultCalendarConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showDefaultCalendarConfirmation = false },
+                title = { Text("添加动态日历") },
+                text = { Text("将创建 1 至 31 日的缺省图标，并按 CandyBar 默认日历应用规则导出。") },
+                confirmButton = {
+                    Button(onClick = {
+                        showDefaultCalendarConfirmation = false
+                        isCreatingDefaultCalendar = true
+                        scope.launch {
+                            val frames = withContext(Dispatchers.IO) {
+                                DynamicIconAssets.createDefaultCalendarFrames(context, projectId)
+                            }
+                            isCreatingDefaultCalendar = false
+                            if (frames == null) {
+                                Toast.makeText(context, "无法创建缺省动态日历图标", Toast.LENGTH_LONG).show()
+                            } else {
+                                viewModel.insertMapping(
+                                    IconMapping(
+                                        projectId = projectId,
+                                        iconName = "动态日历",
+                                        targetPackageName = DynamicIconDefaults.DEFAULT_CALENDAR_MAPPING_PACKAGE,
+                                        targetActivityName = "",
+                                        iconPath = frames.first(),
+                                        mappingType = 1,
+                                        extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+                                    )
+                                )
+                            }
+                        }
+                    }) { Text("确认添加") }
+                },
+                dismissButton = { TextButton(onClick = { showDefaultCalendarConfirmation = false }) { Text("取消") } }
+            )
+        }
+
+        if (isCreatingDefaultCalendar) {
+            Dialog(onDismissRequest = {}) {
+                Card(shape = RoundedCornerShape(8.dp)) {
+                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("正在创建动态日历", style = MaterialTheme.typography.titleMedium)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        }
+
+        calendarToDelete?.let { calendar ->
+            AlertDialog(
+                onDismissRequest = { calendarToDelete = null },
+                title = { Text("删除动态日历") },
+                text = { Text("将删除这组 1 至 31 日图标及其动态日历映射。") },
+                confirmButton = {
+                    Button(onClick = {
+                        viewModel.deleteMapping(calendar)
+                        calendarToDelete = null
+                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") }
+                },
+                dismissButton = { TextButton(onClick = { calendarToDelete = null }) { Text("取消") } }
+            )
+        }
+
+        if (showDefaultClockConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showDefaultClockConfirmation = false },
+                title = { Text("添加动态时钟") },
+                text = { Text("将创建缺省表盘与指针图层，并按 CandyBar 默认时钟应用规则导出。") },
+                confirmButton = {
+                    Button(onClick = {
+                        showDefaultClockConfirmation = false
+                        isCreatingDefaultClock = true
+                        scope.launch {
+                            val layers = withContext(Dispatchers.IO) {
+                                DynamicIconAssets.createDefaultClockLayers(context, projectId)
+                            }
+                            isCreatingDefaultClock = false
+                            if (layers == null) {
+                                Toast.makeText(context, "无法创建缺省动态时钟图标", Toast.LENGTH_LONG).show()
+                            } else {
+                                viewModel.insertMapping(
+                                    IconMapping(
+                                        projectId = projectId,
+                                        iconName = "动态时钟",
+                                        targetPackageName = DynamicIconDefaults.DEFAULT_CLOCK_MAPPING_PACKAGE,
+                                        targetActivityName = "",
+                                        iconPath = layers.backgroundPath,
+                                        mappingType = 2,
+                                        extraInfo = DynamicIconAssets.clockExtraInfo(layers)
+                                    )
+                                )
+                            }
+                        }
+                    }) { Text("确认添加") }
+                },
+                dismissButton = { TextButton(onClick = { showDefaultClockConfirmation = false }) { Text("取消") } }
+            )
+        }
+
+        if (isCreatingDefaultClock) {
+            Dialog(onDismissRequest = {}) {
+                Card(shape = RoundedCornerShape(8.dp)) {
+                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("正在创建动态时钟", style = MaterialTheme.typography.titleMedium)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        }
+
+        clockToDelete?.let { clock ->
+            AlertDialog(
+                onDismissRequest = { clockToDelete = null },
+                title = { Text("删除动态时钟") },
+                text = { Text("将删除表盘、指针图层及其动态时钟映射。") },
+                confirmButton = {
+                    Button(onClick = {
+                        viewModel.deleteMapping(clock)
+                        clockToDelete = null
+                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") }
+                },
+                dismissButton = { TextButton(onClick = { clockToDelete = null }) { Text("取消") } }
+            )
+        }
+
+        if (showCalendarEditor) {
+            CalendarDynamicEditorDialog(
+                projectId = projectId,
+                mapping = calendarMappingToEdit,
+                existingMappings = mappings,
+                onDismiss = { calendarMappingToEdit = null; showCalendarEditor = false },
+                onConfirm = { mapping ->
+                    if (mapping.id == 0L) viewModel.insertMapping(mapping) else viewModel.updateMapping(mapping)
+                    calendarMappingToEdit = null
+                    showCalendarEditor = false
+                }
+            )
+        }
+
+        if (showClockEditor) {
+            ClockDynamicEditorDialog(
+                projectId = projectId,
+                mapping = clockMappingToEdit,
+                existingMappings = mappings,
+                onDismiss = { clockMappingToEdit = null; showClockEditor = false },
+                onConfirm = { mapping ->
+                    if (mapping.id == 0L) viewModel.insertMapping(mapping) else viewModel.updateMapping(mapping)
+                    clockMappingToEdit = null
+                    showClockEditor = false
+                }
+            )
+        }
+
         completedApk?.let { apkFile ->
             ExportCompleteDialog(
                 fileName = apkFile.name,
@@ -326,7 +719,7 @@ private fun ExportProgressDialog(progress: ApkGenerator.Progress) {
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text("正在Build APK", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text("正在构建 APK", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(progress.message, style = MaterialTheme.typography.bodyMedium)
                 LinearProgressIndicator(
                     progress = { (progress.step.coerceIn(0, 5)) / 5f },
@@ -374,7 +767,7 @@ fun ChangeIconDialog(onDismiss: () -> Unit, onFromFile: () -> Unit, onFromGaller
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ListItem(headlineContent = { Text("从相册选择") }, leadingContent = { Icon(Icons.Default.Photo, null) }, modifier = Modifier.clickable { onFromGallery() })
                 ListItem(headlineContent = { Text("从文件选择") }, leadingContent = { Icon(Icons.Default.FileOpen, null) }, modifier = Modifier.clickable { onFromFile() })
-                ListItem(headlineContent = { Text("Fast Gen器") }, leadingContent = { Icon(Icons.Default.AutoFixHigh, null) }, modifier = Modifier.clickable { onViaGenerator() })
+                ListItem(headlineContent = { Text("快速生成") }, leadingContent = { Icon(Icons.Default.AutoFixHigh, null) }, modifier = Modifier.clickable { onViaGenerator() })
             }
         },
         confirmButton = {},
@@ -395,7 +788,7 @@ private fun AddIconDialog(
     var activityName by remember { mutableStateOf("") }
     var showAppPicker by remember { mutableStateOf(false) }
     val packageDuplicate = remember(packageName, existingMappings) {
-        packageName.isNotBlank() && existingMappings.any { it.targetPackageName == packageName }
+        hasPackageConflict(packageName, 0, existingMappings)
     }
     val input = NewIconInput(
         iconName.trim(),
@@ -457,6 +850,7 @@ private fun AddIconDialog(
 @Composable
 fun DuplicateMappingDialog(mapping: IconMapping, existingMappings: List<IconMapping>, onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var inputPkg by remember { mutableStateOf("") }
     var inputActivity by remember { mutableStateOf("") }
     var selectedApp by remember { mutableStateOf<AppInfo?>(null) }
@@ -469,7 +863,7 @@ fun DuplicateMappingDialog(mapping: IconMapping, existingMappings: List<IconMapp
     }
     val isDup = remember(inputPkg, selectedApp, isManual) {
         val t = if (isManual) inputPkg else selectedApp?.packageName ?: ""
-        t.isNotEmpty() && existingMappings.any { it.targetPackageName == t }
+        hasPackageConflict(t, 0, existingMappings)
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("复制") },
         text = {
@@ -509,7 +903,9 @@ fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMa
     var iconName by remember { mutableStateOf(mapping.iconName) }
     var pkg by remember { mutableStateOf(mapping.targetPackageName) }
     var activity by remember { mutableStateOf(mapping.targetActivityName) }
-    val isDup = remember(pkg, existingMappings) { pkg != mapping.targetPackageName && existingMappings.any { it.targetPackageName == pkg } }
+    val isDup = remember(pkg, existingMappings) {
+        pkg != mapping.targetPackageName && hasPackageConflict(pkg, mapping.mappingType, existingMappings, mapping.id)
+    }
     AlertDialog(onDismiss, title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -529,7 +925,312 @@ fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMa
 }
 
 @Composable
-fun DynamicTabContent(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit) {
+private fun DynamicTypePickerDialog(
+    showCalendar: Boolean,
+    showClock: Boolean,
+    onDismiss: () -> Unit,
+    onCalendar: () -> Unit,
+    onClock: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加动态图标") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showCalendar) {
+                    ListItem(
+                        headlineContent = { Text("动态日历") },
+                        leadingContent = { Icon(Icons.Default.CalendarMonth, null) },
+                        modifier = Modifier.clickable(onClick = onCalendar)
+                    )
+                }
+                if (showClock) {
+                    ListItem(
+                        headlineContent = { Text("动态时钟") },
+                        leadingContent = { Icon(Icons.Default.AccessTime, null) },
+                        modifier = Modifier.clickable(onClick = onClock)
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun CalendarDynamicEditorDialog(
+    projectId: Long,
+    mapping: IconMapping?,
+    existingMappings: List<IconMapping>,
+    onDismiss: () -> Unit,
+    onConfirm: (IconMapping) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var iconName by remember(mapping?.id) { mutableStateOf(mapping?.iconName.orEmpty()) }
+    var packageName by remember(mapping?.id) { mutableStateOf(mapping?.targetPackageName.orEmpty()) }
+    var activityName by remember(mapping?.id) { mutableStateOf(mapping?.targetActivityName.orEmpty()) }
+    var frames by remember(mapping?.id) { mutableStateOf(mapping?.let(DynamicIconAssets::calendarFrames).orEmpty()) }
+    var isGeneratingFrames by remember { mutableStateOf(false) }
+    var frameGenerationError by remember { mutableStateOf<String?>(null) }
+    var showAppPicker by remember { mutableStateOf(false) }
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            isGeneratingFrames = true
+            frameGenerationError = null
+            scope.launch {
+                val generated = withContext(Dispatchers.IO) {
+                    DynamicIconAssets.createCalendarFrames(context, uri, projectId)
+                }
+                isGeneratingFrames = false
+                if (generated == null) {
+                    frameGenerationError = "无法读取图片或生成日期图标，请换一张图片后重试。"
+                } else {
+                    frames = generated
+                }
+            }
+        }
+    }
+    val packageDuplicate = remember(packageName, existingMappings, mapping?.id) {
+        hasPackageConflict(packageName, 1, existingMappings, mapping?.id)
+    }
+    val canConfirm = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate && !isGeneratingFrames && frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (mapping == null) "添加动态日历" else "编辑动态日历") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(iconName, { iconName = it }, label = { Text("图标名称") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    packageName,
+                    { packageName = it },
+                    label = { Text("目标包名") },
+                    isError = packageDuplicate,
+                    supportingText = { if (packageDuplicate) Text("该包名已经有其他动态图标映射") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    activityName,
+                    { activityName = it },
+                    label = { Text("目标 Activity") },
+                    placeholder = { Text(defaultActivityName(packageName)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Apps, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("从已安装应用填入包名")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { imageLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("图库") }
+                    OutlinedButton(onClick = { imageLauncher.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("文件") }
+                }
+                when {
+                    isGeneratingFrames -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text("正在生成 31 个日期图标", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    frameGenerationError != null -> {
+                        Text(frameGenerationError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(model = File(frames.first()), contentDescription = null, modifier = Modifier.size(52.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                        Spacer(Modifier.width(12.dp))
+                        Text("已生成 ${frames.size} 个日期图标", style = MaterialTheme.typography.bodySmall)
+                    }
+                    }
+                    else -> {
+                        Text("请选择图片以生成日期图标", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val base = mapping ?: IconMapping(projectId = projectId, targetPackageName = packageName.trim(), targetActivityName = "", iconPath = frames.first())
+                    onConfirm(
+                        base.copy(
+                            iconName = iconName.trim(),
+                            targetPackageName = packageName.trim(),
+                            targetActivityName = activityName.trim().ifBlank { defaultActivityName(packageName) },
+                            iconPath = frames.first(),
+                            mappingType = 1,
+                            extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+                        )
+                    )
+                },
+                enabled = canConfirm
+            ) { Text("确认") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+
+    if (showAppPicker) {
+        AppPicker(
+            onDismiss = { showAppPicker = false },
+            onAppSelected = { app ->
+                packageName = app.packageName
+                activityName = app.activityName
+                showAppPicker = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun ClockDynamicEditorDialog(
+    projectId: Long,
+    mapping: IconMapping?,
+    existingMappings: List<IconMapping>,
+    onDismiss: () -> Unit,
+    onConfirm: (IconMapping) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val storedLayers = remember(mapping?.id) { mapping?.let(DynamicIconAssets::clockLayers) }
+    var iconName by remember(mapping?.id) { mutableStateOf(mapping?.iconName.orEmpty()) }
+    var packageName by remember(mapping?.id) { mutableStateOf(mapping?.targetPackageName.orEmpty()) }
+    var activityName by remember(mapping?.id) { mutableStateOf(mapping?.targetActivityName.orEmpty()) }
+    var backgroundPath by remember(mapping?.id) { mutableStateOf(storedLayers?.backgroundPath.orEmpty()) }
+    var hourPath by remember(mapping?.id) { mutableStateOf(storedLayers?.hourPath.orEmpty()) }
+    var minutePath by remember(mapping?.id) { mutableStateOf(storedLayers?.minutePath.orEmpty()) }
+    var secondPath by remember(mapping?.id) { mutableStateOf(storedLayers?.secondPath.orEmpty()) }
+    var requestedLayer by remember { mutableStateOf<String?>(null) }
+    var showAppPicker by remember { mutableStateOf(false) }
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val layer = requestedLayer
+        if (uri != null && layer != null) {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    DynamicIconAssets.saveAsset(context, uri, projectId, "clock_$layer")
+                }
+                when (layer) {
+                    "background" -> backgroundPath = path.orEmpty()
+                    "hour" -> hourPath = path.orEmpty()
+                    "minute" -> minutePath = path.orEmpty()
+                    "second" -> secondPath = path.orEmpty()
+                }
+            }
+        }
+        requestedLayer = null
+    }
+    val packageDuplicate = remember(packageName, existingMappings, mapping?.id) {
+        hasPackageConflict(packageName, 2, existingMappings, mapping?.id)
+    }
+    val canConfirm = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate && backgroundPath.isNotBlank() && hourPath.isNotBlank() && minutePath.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (mapping == null) "添加动态时钟" else "编辑动态时钟") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(iconName, { iconName = it }, label = { Text("图标名称") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    packageName,
+                    { packageName = it },
+                    label = { Text("目标包名") },
+                    isError = packageDuplicate,
+                    supportingText = { if (packageDuplicate) Text("该包名已经有图标映射") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    activityName,
+                    { activityName = it },
+                    label = { Text("目标 Activity") },
+                    placeholder = { Text(defaultActivityName(packageName)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Apps, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("从已安装应用填入包名")
+                }
+                ClockLayerSelector("表盘", backgroundPath, { requestedLayer = "background"; imageLauncher.launch("image/*") }, { requestedLayer = "background"; imageLauncher.launch("*/*") })
+                ClockLayerSelector("时针", hourPath, { requestedLayer = "hour"; imageLauncher.launch("image/*") }, { requestedLayer = "hour"; imageLauncher.launch("*/*") })
+                ClockLayerSelector("分针", minutePath, { requestedLayer = "minute"; imageLauncher.launch("image/*") }, { requestedLayer = "minute"; imageLauncher.launch("*/*") })
+                ClockLayerSelector("秒针", secondPath, { requestedLayer = "second"; imageLauncher.launch("image/*") }, { requestedLayer = "second"; imageLauncher.launch("*/*") })
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val layers = DynamicIconAssets.ClockLayers(backgroundPath, hourPath, minutePath, secondPath.ifBlank { minutePath })
+                    val base = mapping ?: IconMapping(projectId = projectId, targetPackageName = packageName.trim(), targetActivityName = "", iconPath = backgroundPath)
+                    onConfirm(
+                        base.copy(
+                            iconName = iconName.trim(),
+                            targetPackageName = packageName.trim(),
+                            targetActivityName = activityName.trim().ifBlank { defaultActivityName(packageName) },
+                            iconPath = backgroundPath,
+                            mappingType = 2,
+                            extraInfo = DynamicIconAssets.clockExtraInfo(layers)
+                        )
+                    )
+                },
+                enabled = canConfirm
+            ) { Text("确认") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+
+    if (showAppPicker) {
+        AppPicker(
+            onDismiss = { showAppPicker = false },
+            onAppSelected = { app ->
+                packageName = app.packageName
+                activityName = app.activityName
+                showAppPicker = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun ClockLayerSelector(label: String, path: String, onGallery: () -> Unit, onFile: () -> Unit) {
+    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (path.isNotBlank()) {
+                AsyncImage(model = File(path), contentDescription = null, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+            } else {
+                Icon(Icons.Default.Image, null, Modifier.size(40.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(label, modifier = Modifier.weight(1f))
+            IconButton(onClick = onGallery) { Icon(Icons.Default.Photo, "从图库选择") }
+            IconButton(onClick = onFile) { Icon(Icons.Default.FileOpen, "从文件选择") }
+        }
+    }
+}
+
+@Composable
+private fun DynamicTabContent(
+    mappings: List<IconMapping>,
+    showCalendar: Boolean,
+    showClock: Boolean,
+    onEdit: (IconMapping) -> Unit,
+    onChangeIcon: (IconMapping) -> Unit,
+    onDuplicate: (IconMapping) -> Unit,
+    onDelete: (IconMapping) -> Unit,
+    onEditDynamic: (IconMapping) -> Unit,
+    onCalendarFrameAction: (IconMapping, Int, CalendarFrameAction) -> Unit,
+    onDeleteCalendar: (IconMapping) -> Unit,
+    onClockLayerAction: (IconMapping, DynamicIconAssets.ClockLayer, ClockLayerAction) -> Unit,
+    onDeleteClock: (IconMapping) -> Unit,
+    onSetProjectIcon: (IconMapping) -> Unit
+) {
     val calendars = mappings.filter { it.mappingType == 1 }
     val clocks = mappings.filter { it.mappingType == 2 }
     if (calendars.isEmpty() && clocks.isEmpty()) {
@@ -542,7 +1243,7 @@ fun DynamicTabContent(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit
             Spacer(Modifier.height(16.dp))
             Text("还没有动态图标", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Text("导入包含动态日历或动态时钟的图标包后，会在这里按类型整理。", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("点击右下角添加动态日历或动态时钟。", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -551,28 +1252,191 @@ fun DynamicTabContent(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        DynamicTypeCard(
-            title = "动态日历",
-            subtitle = "按日期切换图标的应用",
-            icon = Icons.Default.CalendarMonth,
-            mappings = calendars,
-            onEdit = onEdit,
-            onChangeIcon = onChangeIcon,
-            onDuplicate = onDuplicate,
-            onDelete = onDelete,
-            onSetProjectIcon = onSetProjectIcon
+        if (showCalendar) {
+            calendars.firstOrNull()?.let { calendar ->
+                CalendarDynamicCard(
+                    mapping = calendar,
+                    onFrameAction = onCalendarFrameAction,
+                    onDelete = onDeleteCalendar
+                )
+            } ?: DynamicTypeCard(
+                title = "动态日历",
+                subtitle = "按日期切换图标的应用",
+                icon = Icons.Default.CalendarMonth,
+                mappings = emptyList(),
+                onEdit = onEdit,
+                onChangeIcon = onChangeIcon,
+                onDuplicate = onDuplicate,
+                onDelete = onDelete,
+                onEditDynamic = onEditDynamic,
+                onSetProjectIcon = onSetProjectIcon
+            )
+        }
+        if (showClock) {
+            clocks.firstOrNull()?.let { clock ->
+                ClockDynamicCard(
+                    mapping = clock,
+                    onLayerAction = onClockLayerAction,
+                    onDelete = onDeleteClock
+                )
+            } ?: DynamicTypeCard(
+                title = "动态时钟",
+                subtitle = "包含表盘与指针图层的图标",
+                icon = Icons.Default.AccessTime,
+                mappings = emptyList(),
+                onEdit = onEdit,
+                onChangeIcon = onChangeIcon,
+                onDuplicate = onDuplicate,
+                onDelete = onDelete,
+                onEditDynamic = onEditDynamic,
+                onSetProjectIcon = onSetProjectIcon
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalendarDynamicCard(
+    mapping: IconMapping,
+    onFrameAction: (IconMapping, Int, CalendarFrameAction) -> Unit,
+    onDelete: (IconMapping) -> Unit
+) {
+    val frames = remember(mapping.iconPath, mapping.extraInfo) { DynamicIconAssets.calendarFrames(mapping) }
+    val rowCount = (DynamicIconAssets.CALENDAR_DAY_COUNT + 3) / 4
+    Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CalendarMonth, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("动态日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("按日期切换图标的应用", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { onDelete(mapping) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除动态日历", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                contentPadding = PaddingValues(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                userScrollEnabled = false,
+                modifier = Modifier.height(106.dp * rowCount).fillMaxWidth()
+            ) {
+                items((1..DynamicIconAssets.CALENDAR_DAY_COUNT).toList(), key = { it }) { day ->
+                    CalendarFrameItem(
+                        day = day,
+                        path = frames[day - 1],
+                        onAction = { action -> onFrameAction(mapping, day, action) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarFrameItem(
+    day: Int,
+    path: String,
+    onAction: (CalendarFrameAction) -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.height(98.dp).clickable { showMenu = true },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        AsyncImage(
+            model = File(path),
+            contentDescription = "$day 日图标",
+            modifier = Modifier.size(64.dp).clip(MaterialTheme.shapes.small),
+            contentScale = ContentScale.Crop
         )
-        DynamicTypeCard(
-            title = "动态时钟",
-            subtitle = "包含表盘与指针图层的图标",
-            icon = Icons.Default.AccessTime,
-            mappings = clocks,
-            onEdit = onEdit,
-            onChangeIcon = onChangeIcon,
-            onDuplicate = onDuplicate,
-            onDelete = onDelete,
-            onSetProjectIcon = onSetProjectIcon
+        Spacer(Modifier.height(4.dp))
+        Text("$day 日", style = MaterialTheme.typography.labelSmall)
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(text = { Text("从图库更换") }, onClick = { showMenu = false; onAction(CalendarFrameAction.Gallery) })
+            DropdownMenuItem(text = { Text("从文件更换") }, onClick = { showMenu = false; onAction(CalendarFrameAction.File) })
+            DropdownMenuItem(text = { Text("恢复缺省图标") }, onClick = { showMenu = false; onAction(CalendarFrameAction.Reset) })
+        }
+    }
+}
+
+@Composable
+private fun ClockDynamicCard(
+    mapping: IconMapping,
+    onLayerAction: (IconMapping, DynamicIconAssets.ClockLayer, ClockLayerAction) -> Unit,
+    onDelete: (IconMapping) -> Unit
+) {
+    val layers = remember(mapping.iconPath, mapping.extraInfo) { DynamicIconAssets.clockLayers(mapping) }
+    Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AccessTime, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("动态时钟", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("按当前时间旋转指针", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { onDelete(mapping) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除动态时钟", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                contentPadding = PaddingValues(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                userScrollEnabled = false,
+                modifier = Modifier.height(112.dp).fillMaxWidth()
+            ) {
+                items(DynamicIconAssets.ClockLayer.values().toList(), key = { it.name }) { layer ->
+                    val path = when (layer) {
+                        DynamicIconAssets.ClockLayer.Background -> layers.backgroundPath
+                        DynamicIconAssets.ClockLayer.Hour -> layers.hourPath
+                        DynamicIconAssets.ClockLayer.Minute -> layers.minutePath
+                        DynamicIconAssets.ClockLayer.Second -> layers.secondPath
+                    }
+                    ClockLayerItem(
+                        layer = layer,
+                        path = path,
+                        onAction = { action -> onLayerAction(mapping, layer, action) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClockLayerItem(
+    layer: DynamicIconAssets.ClockLayer,
+    path: String,
+    onAction: (ClockLayerAction) -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.height(104.dp).clickable { showMenu = true },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        AsyncImage(
+            model = File(path),
+            contentDescription = layer.displayName,
+            modifier = Modifier.size(64.dp).clip(MaterialTheme.shapes.small),
+            contentScale = ContentScale.Fit
         )
+        Spacer(Modifier.height(4.dp))
+        Text(layer.displayName, style = MaterialTheme.typography.labelSmall)
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(text = { Text("从图库更换") }, onClick = { showMenu = false; onAction(ClockLayerAction.Gallery) })
+            DropdownMenuItem(text = { Text("从文件更换") }, onClick = { showMenu = false; onAction(ClockLayerAction.File) })
+            DropdownMenuItem(text = { Text("恢复缺省图层") }, onClick = { showMenu = false; onAction(ClockLayerAction.Reset) })
+        }
     }
 }
 
@@ -586,6 +1450,7 @@ private fun DynamicTypeCard(
     onChangeIcon: (IconMapping) -> Unit,
     onDuplicate: (IconMapping) -> Unit,
     onDelete: (IconMapping) -> Unit,
+    onEditDynamic: (IconMapping) -> Unit,
     onSetProjectIcon: (IconMapping) -> Unit
 ) {
     Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -607,44 +1472,50 @@ private fun DynamicTypeCard(
                     Text("暂无此类图标", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                MappingGridFixed(mappings, onEdit, onChangeIcon, onDuplicate, onDelete, onSetProjectIcon)
+                MappingGridFixed(mappings, onEdit, onChangeIcon, onDuplicate, onDelete, onEditDynamic, onSetProjectIcon)
             }
         }
     }
 }
 
 @Composable
-fun MappingGridFixed(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit) {
+fun MappingGridFixed(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onEditDynamic: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit, enableDynamicActions: Boolean = true) {
     val rows = (mappings.size + 4) / 5
     Box(Modifier.height((rows * 110).dp).fillMaxWidth()) {
         LazyVerticalGrid(columns = GridCells.Fixed(5), contentPadding = PaddingValues(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(12.dp), userScrollEnabled = false, modifier = Modifier.fillMaxSize()) {
-            items(mappings, key = { "${it.id}_${it.targetPackageName}" }) { MappingItemView(it, onEdit, onChangeIcon, onDuplicate, onDelete, onSetProjectIcon) }
+            items(mappings, key = { "${it.id}_${it.targetPackageName}" }) { MappingItemView(it, onEdit, onChangeIcon, onDuplicate, onDelete, onEditDynamic, onSetProjectIcon, enableDynamicActions) }
         }
     }
 }
 
 @Composable
-fun MappingGridWithScrollbar(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit) {
+fun MappingGridWithScrollbar(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onEditDynamic: (IconMapping) -> Unit, enableDynamicActions: Boolean = true, onSetProjectIcon: (IconMapping) -> Unit) {
     val state = rememberLazyGridState()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(state = state, columns = GridCells.Fixed(5), contentPadding = PaddingValues(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-            items(mappings, key = { "${it.id}_${it.targetPackageName}" }) { MappingItemView(it, onEdit, onChangeIcon, onDuplicate, onDelete, onSetProjectIcon) }
+            items(mappings, key = { "${it.id}_${it.targetPackageName}" }) { MappingItemView(it, onEdit, onChangeIcon, onDuplicate, onDelete, onEditDynamic, onSetProjectIcon, enableDynamicActions) }
         }
         VerticalScrollbar(state, Modifier.align(Alignment.CenterEnd).padding(2.dp))
     }
 }
 
 @Composable
-fun MappingItemView(mapping: IconMapping, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit) {
+fun MappingItemView(mapping: IconMapping, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onEditDynamic: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit, enableDynamicActions: Boolean = true) {
     var showMenu by remember { mutableStateOf(false) }
     Column(Modifier.aspectRatio(0.7f).clickable { showMenu = true }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         AsyncImage(model = File(mapping.iconPath), null, Modifier.size(44.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
         Text(mapping.displayName(), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         DropdownMenu(showMenu, { showMenu = false }) {
-            DropdownMenuItem(text = { Text("设置Package") }, onClick = { showMenu = false; onEdit(mapping) })
-            DropdownMenuItem(text = { Text("更换图标") }, onClick = { showMenu = false; onChangeIcon(mapping) })
+            DropdownMenuItem(text = { Text("编辑信息") }, onClick = { showMenu = false; onEdit(mapping) })
+            if (mapping.mappingType == 0 || !enableDynamicActions) {
+                DropdownMenuItem(text = { Text("更换图标") }, onClick = { showMenu = false; onChangeIcon(mapping) })
+            } else {
+                DropdownMenuItem(text = { Text("编辑动态素材") }, onClick = { showMenu = false; onEditDynamic(mapping) })
+            }
             DropdownMenuItem(text = { Text("设为项目图标") }, onClick = { showMenu = false; onSetProjectIcon(mapping) })
-            DropdownMenuItem(text = { Text("复制") }, onClick = { showMenu = false; onDuplicate(mapping) })
+            if (mapping.mappingType == 0 || !enableDynamicActions) {
+                DropdownMenuItem(text = { Text("复制") }, onClick = { showMenu = false; onDuplicate(mapping) })
+            }
             DropdownMenuItem(text = { Text("删除", color = Color.Red) }, onClick = { showMenu = false; onDelete(mapping) })
         }
     }
@@ -660,12 +1531,12 @@ fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, 
     Dialog(onD) {
         Card(shape = RoundedCornerShape(28.dp), elevation = CardDefaults.cardElevation(8.dp)) {
             Column(Modifier.padding(24.dp), Arrangement.spacedBy(16.dp)) {
-                Text("Search图标", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(q, onQ, Modifier.fillMaxWidth().focusRequester(fr), placeholder = { Text("e.g. mp3") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
+                Text("搜索图标", style = MaterialTheme.typography.headlineSmall)
+                OutlinedTextField(q, onQ, Modifier.fillMaxWidth().focusRequester(fr), placeholder = { Text("例如：音乐") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(m == 0, { onM(0) }); Text("包名", Modifier.clickable { onM(0) })
                     Spacer(Modifier.width(16.dp))
-                    RadioButton(m == 1, { onM(1) }); Text("Name", Modifier.clickable { onM(1) })
+                    RadioButton(m == 1, { onM(1) }); Text("图标名称", Modifier.clickable { onM(1) })
                 }
                 Row(Modifier.fillMaxWidth(), Arrangement.End) {
                     TextButton(onD) { Text("取消") }
@@ -677,13 +1548,15 @@ fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, 
 }
 
 @Composable
-fun FabMenu(onAdd: () -> Unit, onSearch: () -> Unit, onStats: () -> Unit) {
+fun FabMenu(onAdd: () -> Unit, onSearch: () -> Unit, onStats: () -> Unit, showAdd: Boolean = true) {
     var ex by remember { mutableStateOf(false) }
     Column(horizontalAlignment = Alignment.End) {
         if (ex) {
             SmallFloatingActionButton({ ex = false; onStats() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.PieChart, null) }
             SmallFloatingActionButton({ ex = false; onSearch() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Search, null) }
-            SmallFloatingActionButton({ ex = false; onAdd() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Add, null) }
+            if (showAdd) {
+                SmallFloatingActionButton({ ex = false; onAdd() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Add, null) }
+            }
         }
         FloatingActionButton({ ex = !ex }) { Icon(if (ex) Icons.Default.Close else Icons.Default.Menu, null) }
     }
@@ -736,12 +1609,12 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), Arrangement.spacedBy(24.dp)) {
         Text("样式", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-            Text("Scale: ${(project.scaleFactor * 100).toInt()}%")
+            Text("缩放：${(project.scaleFactor * 100).toInt()}%")
             Slider(value = project.scaleFactor, onValueChange = { onUpdate(project.copy(scaleFactor = it)) }, valueRange = 0.5f..1.5f)
         } }
         
-        IconSettingItem("蒙版", "Clip shape for all icons", project.iconMaskPath, { currentPickingType = "mask"; stylePickerLauncher.launch("image/*") }, { onUpdate(project.copy(iconMaskPath = null)) })
-        IconSettingItem("叠层", "Top-most layer overlay", project.iconUponPath, { currentPickingType = "upon"; stylePickerLauncher.launch("image/*") }, { onUpdate(project.copy(iconUponPath = null)) })
+        IconSettingItem("蒙版", "应用于所有图标的裁切形状", project.iconMaskPath, { currentPickingType = "mask"; stylePickerLauncher.launch("image/*") }, { onUpdate(project.copy(iconMaskPath = null)) })
+        IconSettingItem("叠层", "显示在图标最上方的覆盖层", project.iconUponPath, { currentPickingType = "upon"; stylePickerLauncher.launch("image/*") }, { onUpdate(project.copy(iconUponPath = null)) })
         
         Text("背景", style = MaterialTheme.typography.titleMedium)
         project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.forEach { path ->

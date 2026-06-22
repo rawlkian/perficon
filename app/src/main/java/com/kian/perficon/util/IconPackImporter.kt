@@ -80,6 +80,7 @@ class IconPackImporter(
 
             val allIconsMap = mutableMapOf<String, Triple<String?, String, String>>()
             val clockMappings = mutableListOf<Triple<String, String, JSONObject>>()
+            val dynamicClockDrawables = mutableSetOf<String>()
             val globalConfig = GlobalOverlayConfig()
 
             for (fileName in mappingFiles) {
@@ -89,19 +90,19 @@ class IconPackImporter(
                 try {
                     assetsStream = remoteContext.assets.open(fileName)
                     val parser = Xml.newPullParser().apply { setInput(assetsStream, "UTF-8") }
-                    parseXmlToMap(parser, allIconsMap, clockMappings, globalConfig)
+                    parseXmlToMap(parser, allIconsMap, clockMappings, dynamicClockDrawables, globalConfig)
                 } catch (e: Exception) {} finally { assetsStream?.close() }
 
                 try {
                     val resId = remoteRes.getIdentifier(resName, "xml", sourcePackageName)
                     if (resId != 0) {
                         val parser = remoteRes.getXml(resId)
-                        parseXmlToMap(parser, allIconsMap, clockMappings, globalConfig)
+                        parseXmlToMap(parser, allIconsMap, clockMappings, dynamicClockDrawables, globalConfig)
                     }
                 } catch (e: Exception) {}
             }
 
-            if (allIconsMap.isEmpty() && clockMappings.isEmpty()) {
+            if (allIconsMap.isEmpty() && clockMappings.isEmpty() && dynamicClockDrawables.isEmpty()) {
                 progressFlow.value = progressFlow.value.copy(error = "No valid mapping found", isFinished = true)
                 return@withContext false
             }
@@ -119,6 +120,10 @@ class IconPackImporter(
             )
 
             var currentProcessed = 0
+            val calendarComponents = allIconsMap.values
+                .filter { it.third.equals("calendar", true) || it.third.equals("calender", true) }
+                .mapNotNull { it.first }
+                .toSet()
 
             // Items & Calendars
             for ((_, triple) in allIconsMap) {
@@ -126,16 +131,59 @@ class IconPackImporter(
                 val drawableName = triple.second
                 val tagName = triple.third
 
-                val (targetPkg, targetActivity) = parseComponentInfo(component)
-                val iconPath = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, drawableName, "${drawableName}_${System.currentTimeMillis()}", projectIconsDir)
+                val isCalendar = tagName.equals("calendar", true) || tagName.equals("calender", true)
+                if (!isCalendar && component != null && component in calendarComponents) {
+                    continue
+                }
 
-                if (iconPath != null) {
+                val (targetPkg, targetActivity) = parseComponentInfo(component)
+                if (isCalendar) {
+                    val frames = (1..DynamicIconAssets.CALENDAR_DAY_COUNT).mapNotNull { day ->
+                        extractDrawableToPrivateStorage(
+                            remoteContext,
+                            sourcePackageName,
+                            "${drawableName}$day",
+                            "calendar_${System.currentTimeMillis()}_$day",
+                            projectIconsDir
+                        )
+                    }
+                    if (frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT) {
+                        repository.insertMapping(IconMapping(
+                            projectId = projectId,
+                            iconName = targetPkg.substringAfterLast("."),
+                            targetPackageName = targetPkg,
+                            targetActivityName = targetActivity,
+                            iconPath = frames.first(),
+                            mappingType = 1,
+                            extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+                        ))
+                    }
+                } else if (drawableName in dynamicClockDrawables) {
+                    val layers = extractClockLayers(remoteContext, sourcePackageName, drawableName, projectIconsDir)
+                    if (layers != null) {
+                        repository.insertMapping(IconMapping(
+                            projectId = projectId,
+                            iconName = targetPkg.substringAfterLast("."),
+                            targetPackageName = targetPkg,
+                            targetActivityName = targetActivity,
+                            iconPath = layers.backgroundPath,
+                            mappingType = 2,
+                            extraInfo = DynamicIconAssets.clockExtraInfo(layers)
+                        ))
+                    }
+                } else {
+                    val iconPath = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, drawableName, "${drawableName}_${System.currentTimeMillis()}", projectIconsDir)
+                    if (iconPath == null) {
+                        currentProcessed++
+                        progressFlow.value = progressFlow.value.copy(currentItem = currentProcessed)
+                        continue
+                    }
                     repository.insertMapping(IconMapping(
                         projectId = projectId,
+                        iconName = targetPkg.substringAfterLast("."),
                         targetPackageName = targetPkg,
                         targetActivityName = targetActivity,
-                        iconPath = iconPath,
-                        mappingType = if (tagName.equals("calendar", true)) 1 else 0
+                        iconPath = iconPath
                     ))
                 }
                 currentProcessed++
@@ -186,13 +234,19 @@ class IconPackImporter(
         }
     }
 
-    private fun parseXmlToMap(parser: XmlPullParser, map: MutableMap<String, Triple<String?, String, String>>, clocks: MutableList<Triple<String, String, JSONObject>>, config: GlobalOverlayConfig) {
+    private fun parseXmlToMap(
+        parser: XmlPullParser,
+        map: MutableMap<String, Triple<String?, String, String>>,
+        clocks: MutableList<Triple<String, String, JSONObject>>,
+        dynamicClockDrawables: MutableSet<String>,
+        config: GlobalOverlayConfig
+    ) {
         try {
             var eventType = parser.eventType
             while (eventType != XmlPullParser.END_DOCUMENT) {
                 if (eventType == XmlPullParser.START_TAG) {
                     when (parser.name) {
-                        "item", "calendar" -> {
+                        "item", "calendar", "calender" -> {
                             val comp = getSafeAttribute(parser, "component")
                             val draw = getSafeAttribute(parser, "drawable") ?: getSafeAttribute(parser, "prefix")
                             if (draw != null) map["${comp ?: ""}_$draw"] = Triple(comp, draw, parser.name)
@@ -210,6 +264,8 @@ class IconPackImporter(
                                     clockEvent = parser.next()
                                 }
                                 clocks.add(Triple(pkg, draw, hands))
+                            } else if (draw != null) {
+                                dynamicClockDrawables += draw
                             }
                         }
                         "iconmask" -> getSafeAttribute(parser, "img1")?.let { config.maskImg = it }
@@ -238,6 +294,21 @@ class IconPackImporter(
         val regex = "ComponentInfo\\{([^/]+)/([^}]+)\\}".toRegex()
         val match = regex.find(cleaned)
         return if (match != null) match.groupValues[1] to match.groupValues[2] else "" to ""
+    }
+
+    private fun extractClockLayers(
+        remoteContext: Context,
+        remotePkg: String,
+        drawableName: String,
+        outputDir: File
+    ): DynamicIconAssets.ClockLayers? {
+        val slot = Regex("clock_dynamic_(\\d+)").find(drawableName)?.groupValues?.getOrNull(1)
+        val face = extractDrawableToPrivateStorage(remoteContext, remotePkg, drawableName, "clock_face_${System.currentTimeMillis()}", outputDir)
+        val background = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_bg", "clock_bg_${System.currentTimeMillis()}", outputDir) } ?: face
+        val hour = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_hour", "clock_hour_${System.currentTimeMillis()}", outputDir) } ?: background
+        val minute = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_minute", "clock_minute_${System.currentTimeMillis()}", outputDir) } ?: hour
+        val second = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_second", "clock_second_${System.currentTimeMillis()}", outputDir) } ?: minute
+        return background?.let { DynamicIconAssets.ClockLayers(it, hour ?: it, minute ?: hour ?: it, second ?: minute ?: hour ?: it) }
     }
 
     private fun extractDrawableToPrivateStorage(remoteContext: Context, remotePkg: String, drawableName: String?, fileName: String, outputDir: File): String? {

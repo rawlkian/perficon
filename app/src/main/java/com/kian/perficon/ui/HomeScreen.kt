@@ -149,7 +149,7 @@ fun HomeScreen(
         }
 
         if (showAddDialog) {
-            AddProjectDialog(onDismiss = { showAddDialog = false }, onConfirm = { name, pkg, iconPath -> viewModel.insertProject(name, pkg, iconPath); showAddDialog = false })
+            AddProjectDialog(onDismiss = { showAddDialog = false }, onConfirm = { name, pkg, iconPath, _, _ -> viewModel.insertProject(name, pkg, iconPath); showAddDialog = false })
         }
 
         if (showEditDialog != null) {
@@ -160,7 +160,7 @@ fun HomeScreen(
                 initialIconPath = showEditDialog!!.projectIconPath,
                 confirmLabel = "保存",
                 onDismiss = { showEditDialog = null },
-                onConfirm = { name, pkg, iconPath ->
+                onConfirm = { name, pkg, iconPath, _, _ ->
                     viewModel.updateProject(showEditDialog!!.copy(name = name, packageName = pkg, projectIconPath = iconPath))
                     showEditDialog = null
                 }
@@ -172,7 +172,7 @@ fun HomeScreen(
                 title = "Import ${pendingInstalledPack?.name}",
                 confirmLabel = "Import",
                 onDismiss = { pendingInstalledPack = null },
-                onConfirm = { name, pkg, _ ->
+                onConfirm = { name, pkg, _, _, _ ->
                     val pack = pendingInstalledPack ?: return@AddProjectDialog
                     pendingInstalledPack = null
                     showProgressDialog = true
@@ -261,14 +261,19 @@ fun AddProjectDialog(
     initialName: String = "",
     initialPkg: String = "com.example.iconpack",
     initialIconPath: String? = null,
+    showDynamicOptions: Boolean = false,
+    initialUseDynamicCalendar: Boolean = true,
+    initialUseDynamicClock: Boolean = true,
     confirmLabel: String = "创建",
     onDismiss: () -> Unit,
-    onConfirm: (String, String, String?) -> Unit
+    onConfirm: (String, String, String?, Boolean, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var name by remember { mutableStateOf(initialName) }
     var pkg by remember { mutableStateOf(initialPkg) }
     var iconPath by remember { mutableStateOf(initialIconPath) }
+    var useDynamicCalendar by remember { mutableStateOf(initialUseDynamicCalendar) }
+    var useDynamicClock by remember { mutableStateOf(initialUseDynamicClock) }
     var nameError by remember { mutableStateOf<String?>(null) }
     var pkgError by remember { mutableStateOf<String?>(null) }
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -294,9 +299,22 @@ fun AddProjectDialog(
                     OutlinedButton(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("从图库选择") }
                     OutlinedButton(onClick = { fileLauncher.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("从文件选择") }
                 }
+                if (showDynamicOptions) {
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("使用动态日历") },
+                        trailingContent = { Switch(checked = useDynamicCalendar, onCheckedChange = { useDynamicCalendar = it }) },
+                        modifier = Modifier.clickable { useDynamicCalendar = !useDynamicCalendar }
+                    )
+                    ListItem(
+                        headlineContent = { Text("使用动态时钟") },
+                        trailingContent = { Switch(checked = useDynamicClock, onCheckedChange = { useDynamicClock = it }) },
+                        modifier = Modifier.clickable { useDynamicClock = !useDynamicClock }
+                    )
+                }
             }
         },
-        confirmButton = { Button(onClick = { if (name.isNotBlank() && pkg.contains(".")) onConfirm(name, pkg, iconPath) }, shape = MaterialTheme.shapes.large) { Text(confirmLabel) } },
+        confirmButton = { Button(onClick = { if (name.isNotBlank() && pkg.contains(".")) onConfirm(name, pkg, iconPath, useDynamicCalendar, useDynamicClock) }, shape = MaterialTheme.shapes.large) { Text(confirmLabel) } },
         dismissButton = { TextButton(onDismiss) { Text("取消") } },
         shape = MaterialTheme.shapes.extraLarge
     )
