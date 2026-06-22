@@ -20,8 +20,10 @@ import androidx.room.PrimaryKey
 data class IconMapping(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val projectId: Long,
+    val iconName: String = "",
     val targetPackageName: String,
     val targetActivityName: String,
     val iconPath: String,
-    val mappingType: Int = 0 // 0: Normal, 1: Dynamic/Calendar
+    val mappingType: Int = 0, // 0: Normal, 1: Calendar, 2: Clock
+    val extraInfo: String? = null // JSON for specialized data (prefix, hand paths, etc.)
 )

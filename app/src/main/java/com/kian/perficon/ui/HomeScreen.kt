@@ -8,14 +8,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,8 +25,7 @@ import androidx.core.graphics.drawable.toBitmap
 import com.kian.perficon.model.IconPackProject
 import com.kian.perficon.viewmodel.IconPackViewModel
 import com.kian.perficon.util.IconPackImporter
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.kian.perficon.util.saveIconToInternalStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -41,9 +37,8 @@ fun HomeScreen(
 ) {
     val projects by viewModel.allProjects.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
-    var showImportDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf<IconPackProject?>(null) }
     var showInstalledPacksDialog by remember { mutableStateOf(false) }
-    var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var pendingInstalledPack by remember { mutableStateOf<IconPackImporter.IconPackInfo?>(null) }
     var showBottomSheet by remember { mutableStateOf(false) }
     var projectToDelete by remember { mutableStateOf<IconPackProject?>(null) }
@@ -57,16 +52,30 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // Permission Check
+    var showPermissionRequest by remember { mutableStateOf(!com.kian.perficon.util.StorageHelper.isStorageManager()) }
+
+    if (showPermissionRequest) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("需要存储访问权限") },
+            text = { Text("Perficon needs 'All Files Access' to manage your icon pack projects in the root folder (/Perficon).") },
+            confirmButton = {
+                Button(onClick = { 
+                    com.kian.perficon.util.StorageHelper.requestAllFilesAccess(context)
+                    showPermissionRequest = false
+                }) {
+                    Text("授权访问")
+                }
+            },
+            shape = MaterialTheme.shapes.extraLarge
+        )
+    }
+
     Scaffold(
         topBar = {
             LargeTopAppBar(
-                title = { 
-                    Text(
-                        "Perficon",
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Bold
-                    ) 
-                },
+                title = { Text("Perficon", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.primary
@@ -76,24 +85,20 @@ fun HomeScreen(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { showBottomSheet = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("New Project") },
+                icon = { Icon(Icons.Default.Add, null) },
+                text = { Text("新建项目") },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 shape = MaterialTheme.shapes.large
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (projects.isEmpty()) {
                 EmptyState(onNewProject = { showBottomSheet = true })
             } else {
                 Text(
-                    "My Icon Packs",
+                    "我的图标包",
                     modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.secondary,
@@ -106,17 +111,13 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(projects, key = { it.id }) { project ->
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            ExpressiveProjectItem(
-                                project = project,
-                                onClick = { onNavigateToProject(project.id) },
-                                onDelete = { projectToDelete = project }
-                            )
-                        }
+                        ExpressiveProjectItem(
+                            project = project,
+                            onClick = { onNavigateToProject(project.id) },
+                            onEdit = { showEditDialog = project },
+                            onDuplicate = { viewModel.duplicateProject(project) },
+                            onDelete = { projectToDelete = project }
+                        )
                     }
                 }
             }
@@ -129,67 +130,39 @@ fun HomeScreen(
                 shape = MaterialTheme.shapes.extraLarge,
                 containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 32.dp, start = 16.dp, end = 16.dp, top = 8.dp)
-                ) {
-                    Text(
-                        "Create Icon Pack",
-                        style = MaterialTheme.typography.headlineSmall,
-                        modifier = Modifier.padding(16.dp),
-                        fontWeight = FontWeight.Bold
-                    )
-                    
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp, start = 16.dp, end = 16.dp, top = 8.dp)) {
+                    Text("创建图标包", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
                     ListItem(
-                        headlineContent = { Text("Create from Scratch") },
-                        supportingContent = { Text("Start with a blank project and add icons manually") },
-                        leadingContent = { 
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Add, contentDescription = null)
-                                }
-                            }
-                        },
-                        modifier = Modifier.clickable {
-                            showBottomSheet = false
-                            showAddDialog = true
-                        }
+                        headlineContent = { Text("从零Create") },
+                        supportingContent = { Text("从空白项目开始") },
+                        leadingContent = { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, null) } } },
+                        modifier = Modifier.clickable { showBottomSheet = false; showAddDialog = true }
                     )
-                    
                     ListItem(
-                        headlineContent = { Text("Import from Installed App") },
-                        supportingContent = { Text("Pick an icon pack already installed on your device") },
-                        leadingContent = { 
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = MaterialTheme.colorScheme.tertiaryContainer,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Apps, contentDescription = null)
-                                }
-                            }
-                        },
-                        modifier = Modifier.clickable {
-                            showBottomSheet = false
-                            showInstalledPacksDialog = true
-                        }
+                        headlineContent = { Text("从Installed Apps导入") },
+                        supportingContent = { Text("从设备中选择图标包") },
+                        leadingContent = { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.size(48.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Apps, null) } } },
+                        modifier = Modifier.clickable { showBottomSheet = false; showInstalledPacksDialog = true }
                     )
                 }
             }
         }
 
         if (showAddDialog) {
+            AddProjectDialog(onDismiss = { showAddDialog = false }, onConfirm = { name, pkg, iconPath -> viewModel.insertProject(name, pkg, iconPath); showAddDialog = false })
+        }
+
+        if (showEditDialog != null) {
             AddProjectDialog(
-                onDismiss = { showAddDialog = false },
-                onConfirm = { name, pkg ->
-                    viewModel.insertProject(name, pkg)
-                    showAddDialog = false
+                title = "编辑项目",
+                initialName = showEditDialog!!.name,
+                initialPkg = showEditDialog!!.packageName,
+                initialIconPath = showEditDialog!!.projectIconPath,
+                confirmLabel = "保存",
+                onDismiss = { showEditDialog = null },
+                onConfirm = { name, pkg, iconPath ->
+                    viewModel.updateProject(showEditDialog!!.copy(name = name, packageName = pkg, projectIconPath = iconPath))
+                    showEditDialog = null
                 }
             )
         }
@@ -199,220 +172,32 @@ fun HomeScreen(
                 title = "Import ${pendingInstalledPack?.name}",
                 confirmLabel = "Import",
                 onDismiss = { pendingInstalledPack = null },
-                onConfirm = { name, pkg ->
-                    val packToImport = pendingInstalledPack ?: return@AddProjectDialog
+                onConfirm = { name, pkg, _ ->
+                    val pack = pendingInstalledPack ?: return@AddProjectDialog
                     pendingInstalledPack = null
                     showProgressDialog = true
-                    scope.launch {
-                        viewModel.importFromInstalledApp(
-                            packToImport.packageName, 
-                            name, 
-                            pkg, 
-                            progressFlow
-                        )
-                    }
+                    scope.launch { viewModel.importFromInstalledApp(pack.packageName, name, pkg, progressFlow) }
                 }
             )
         }
 
         if (showInstalledPacksDialog) {
-            InstalledPacksDialog(
-                viewModel = viewModel,
-                onDismiss = { showInstalledPacksDialog = false },
-                onPackSelected = { pack ->
-                    pendingInstalledPack = pack
-                    showInstalledPacksDialog = false
-                }
-            )
+            InstalledPacksDialog(viewModel = viewModel, onDismiss = { showInstalledPacksDialog = false }, onPackSelected = { pendingInstalledPack = it; showInstalledPacksDialog = false })
         }
 
         if (showProgressDialog) {
-            ImportProgressDialog(
-                progress = currentProgress,
-                onDismiss = { 
-                    showProgressDialog = false
-                    progressFlow.value = IconPackImporter.ImportProgress() // Reset
-                }
-            )
+            ImportProgressDialog(progress = currentProgress, onDismiss = { showProgressDialog = false; progressFlow.value = IconPackImporter.ImportProgress() })
         }
 
         if (projectToDelete != null) {
             AlertDialog(
                 onDismissRequest = { projectToDelete = null },
-                title = { Text("Delete Project?") },
+                title = { Text("Delete项目？") },
                 text = { Text("Are you sure you want to delete '${projectToDelete?.name}'? This action cannot be undone.") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            projectToDelete?.let { viewModel.deleteProject(it) }
-                            projectToDelete = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Delete")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { projectToDelete = null }) {
-                        Text("Cancel")
-                    }
-                },
+                confirmButton = { Button(onClick = { viewModel.deleteProject(projectToDelete!!); projectToDelete = null }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") } },
+                dismissButton = { TextButton(onClick = { projectToDelete = null }) { Text("取消") } },
                 shape = MaterialTheme.shapes.extraLarge
             )
-        }
-    }
-}
-
-@Composable
-fun ImportProgressDialog(
-    progress: IconPackImporter.ImportProgress,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = { if (progress.isFinished) onDismiss() },
-        title = { Text(if (progress.isFinished) "Import Finished" else "Importing Icons...") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (progress.error != null) {
-                    Text("Error: ${progress.error}", color = MaterialTheme.colorScheme.error)
-                } else {
-                    val percent = if (progress.totalItems > 0) progress.currentItem.toFloat() / progress.totalItems else 0f
-                    
-                    LinearProgressIndicator(
-                        progress = percent,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    
-                    Text("Processed: ${progress.currentItem} / ${progress.totalItems}")
-                    
-                    HorizontalDivider()
-                    
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (progress.hasMask) Icons.Default.CheckCircle else Icons.Default.FileUpload,
-                            contentDescription = null,
-                            tint = if (progress.hasMask) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Icon Mask", color = if (progress.hasMask) Color.Unspecified else MaterialTheme.colorScheme.outline)
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (progress.hasUpon) Icons.Default.CheckCircle else Icons.Default.FileUpload,
-                            contentDescription = null,
-                            tint = if (progress.hasUpon) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Icon Overlay (Upon)", color = if (progress.hasUpon) Color.Unspecified else MaterialTheme.colorScheme.outline)
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (progress.backCount > 0) Icons.Default.CheckCircle else Icons.Default.FileUpload,
-                            contentDescription = null,
-                            tint = if (progress.backCount > 0) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Backgrounds Found: ${progress.backCount}", color = if (progress.backCount > 0) Color.Unspecified else MaterialTheme.colorScheme.outline)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (progress.isFinished) {
-                Button(onClick = onDismiss) { Text("OK") }
-            }
-        }
-    )
-}
-
-@Composable
-fun InstalledPacksDialog(
-    viewModel: IconPackViewModel,
-    onDismiss: () -> Unit,
-    onPackSelected: (IconPackImporter.IconPackInfo) -> Unit
-) {
-    val packs by viewModel.installedIconPacks.collectAsState()
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Installed Icon Packs") },
-        text = {
-            if (packs.isEmpty()) {
-                Text("No supported icon packs found.")
-            } else {
-                LazyColumn(modifier = Modifier.height(400.dp)) {
-                    items(packs) { pack ->
-                        ListItem(
-                            headlineContent = { Text(pack.name) },
-                            supportingContent = { Text(pack.packageName) },
-                            leadingContent = {
-                                Image(
-                                    bitmap = pack.icon.toBitmap().asImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small)
-                                )
-                            },
-                            modifier = Modifier.clickable { onPackSelected(pack) }
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        },
-        shape = MaterialTheme.shapes.extraLarge
-    )
-}
-
-@Composable
-fun EmptyState(onNewProject: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(120.dp)
-                .background(
-                    MaterialTheme.colorScheme.primaryContainer,
-                    MaterialTheme.shapes.extraLarge
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        }
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            "Start your first icon pack",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            "Design, map and export your custom icons easily.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Button(
-            onClick = onNewProject,
-            shape = MaterialTheme.shapes.large,
-            contentPadding = PaddingValues(horizontal = 32.dp, vertical = 16.dp)
-        ) {
-            Text("Get Started")
         }
     }
 }
@@ -421,139 +206,144 @@ fun EmptyState(onNewProject: () -> Unit) {
 fun ExpressiveProjectItem(
     project: IconPackProject,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
         tonalElevation = 4.dp
     ) {
-        Row(
-            modifier = Modifier
-                .padding(20.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.shapes.large
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        project.name.take(1).uppercase(),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = project.name, 
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = project.packageName, 
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+        Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.large), contentAlignment = Alignment.Center) {
+                Text(project.name.take(1).uppercase(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = project.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                Text(text = project.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             
-            IconButton(
-                onClick = onDelete,
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                    contentColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete")
+            Box {
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(text = { Text("编辑") }, onClick = { showMenu = false; onEdit() }, leadingIcon = { Icon(Icons.Default.Edit, null) })
+                    DropdownMenuItem(text = { Text("复制") }, onClick = { showMenu = false; onDuplicate() }, leadingIcon = { Icon(Icons.Default.ContentCopy, null) })
+                    Divider()
+                    DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; onDelete() }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) })
+                }
             }
         }
     }
 }
 
 @Composable
+fun EmptyState(onNewProject: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Box(modifier = Modifier.size(120.dp).background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.extraLarge), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Add, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("开始制作第一个图标包", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("轻松设计并导出自定义图标。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Spacer(modifier = Modifier.height(32.dp))
+        Button(onClick = onNewProject, shape = MaterialTheme.shapes.large, contentPadding = PaddingValues(horizontal = 32.dp, vertical = 16.dp)) { Text("开始使用") }
+    }
+}
+
+@Composable
 fun AddProjectDialog(
-    title: String = "New Icon Pack",
-    confirmLabel: String = "Create",
+    title: String = "新建图标包",
+    initialName: String = "",
+    initialPkg: String = "com.example.iconpack",
+    initialIconPath: String? = null,
+    confirmLabel: String = "创建",
     onDismiss: () -> Unit,
-    onConfirm: (String, String) -> Unit
+    onConfirm: (String, String, String?) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var pkg by remember { mutableStateOf("com.example.iconpack") }
-    
+    val context = LocalContext.current
+    var name by remember { mutableStateOf(initialName) }
+    var pkg by remember { mutableStateOf(initialPkg) }
+    var iconPath by remember { mutableStateOf(initialIconPath) }
     var nameError by remember { mutableStateOf<String?>(null) }
     var pkgError by remember { mutableStateOf<String?>(null) }
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            iconPath = saveIconToInternalStorage(context, it, "project_icon_${System.currentTimeMillis()}.png")
+        }
+    }
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            iconPath = saveIconToInternalStorage(context, it, "project_icon_${System.currentTimeMillis()}.png")
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, style = MaterialTheme.typography.headlineMedium) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { 
-                        name = it
-                        nameError = if (it.isBlank()) "Project name cannot be empty" else null
-                    },
-                    label = { Text("Project Name") },
-                    isError = nameError != null,
-                    supportingText = nameError?.let { { Text(it) } },
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = pkg,
-                    onValueChange = { 
-                        pkg = it
-                        pkgError = when {
-                            it.isBlank() -> "Package name cannot be empty"
-                            !it.contains(".") -> "Invalid package name (e.g. com.example.app)"
-                            else -> null
-                        }
-                    },
-                    label = { Text("Package Name") },
-                    isError = pkgError != null,
-                    supportingText = pkgError?.let { { Text(it) } },
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(value = name, onValueChange = { name = it; nameError = if (it.isBlank()) "必填" else null }, label = { Text("Project Name") }, isError = nameError != null, supportingText = nameError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = pkg, onValueChange = { pkg = it; pkgError = if (!it.contains(".")) "Package格式无效" else null }, label = { Text("Package Name") }, isError = pkgError != null, supportingText = pkgError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
+                Text(if (iconPath == null) "未选择项目图标" else "已选择项目图标", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("从图库选择") }
+                    OutlinedButton(onClick = { fileLauncher.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("从文件选择") }
+                }
             }
         },
-        confirmButton = {
-            Button(
-                onClick = { 
-                    val hasNameError = name.isBlank()
-                    val hasPkgError = pkg.isBlank() || !pkg.contains(".")
-                    
-                    if (hasNameError) nameError = "Project name cannot be empty"
-                    if (hasPkgError) pkgError = "Valid package name required"
-                    
-                    if (!hasNameError && !hasPkgError) {
-                        onConfirm(name, pkg)
-                    }
-                },
-                shape = MaterialTheme.shapes.large
-            ) {
-                Text(confirmLabel)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
+        confirmButton = { Button(onClick = { if (name.isNotBlank() && pkg.contains(".")) onConfirm(name, pkg, iconPath) }, shape = MaterialTheme.shapes.large) { Text(confirmLabel) } },
+        dismissButton = { TextButton(onDismiss) { Text("取消") } },
         shape = MaterialTheme.shapes.extraLarge
+    )
+}
+
+@Composable
+fun ImportProgressDialog(progress: IconPackImporter.ImportProgress, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = { if (progress.isFinished) onDismiss() }, title = { Text(if (progress.isFinished) "导入完成" else "Importing Icons...") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (progress.error != null) { Text("Error: ${progress.error}", color = MaterialTheme.colorScheme.error) } 
+                else {
+                    LinearProgressIndicator(progress = if (progress.totalItems > 0) progress.currentItem.toFloat() / progress.totalItems else 0f, modifier = Modifier.fillMaxWidth())
+                    Text("Processed: ${progress.currentItem} / ${progress.totalItems}")
+                    HorizontalDivider()
+                    ProgressStatusItem("Icon Mask", progress.hasMask)
+                    ProgressStatusItem("图标Overlay", progress.hasUpon)
+                    ProgressStatusItem("Backgrounds: ${progress.backCount}", progress.backCount > 0)
+                }
+            }
+        },
+        confirmButton = { if (progress.isFinished) Button(onClick = onDismiss) { Text("确定") } }
+    )
+}
+
+@Composable
+fun ProgressStatusItem(label: String, active: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (active) Icons.Default.CheckCircle else Icons.Default.FileUpload, null, tint = if (active) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline)
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = if (active) Color.Unspecified else MaterialTheme.colorScheme.outline)
+    }
+}
+
+@Composable
+fun InstalledPacksDialog(viewModel: IconPackViewModel, onDismiss: () -> Unit, onPackSelected: (IconPackImporter.IconPackInfo) -> Unit) {
+    val packs by viewModel.installedIconPacks.collectAsState()
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("已安装的图标包") },
+        text = {
+            if (packs.isEmpty()) { Text("未找到图标包") } 
+            else {
+                LazyColumn(modifier = Modifier.height(400.dp)) {
+                    items(packs) { pack ->
+                        ListItem(headlineContent = { Text(pack.name) }, supportingContent = { Text(pack.packageName) }, leadingContent = { Image(bitmap = pack.icon.toBitmap().asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small)) }, modifier = Modifier.clickable { onPackSelected(pack) } )
+                    }
+                }
+            }
+        }, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }, shape = MaterialTheme.shapes.extraLarge
     )
 }

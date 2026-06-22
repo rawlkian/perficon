@@ -9,76 +9,143 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
-/**
- * ApkGenerator optimized for templates like CandyBar.
- * It injects appfilter.xml, drawable.xml, and icons into the specified folders.
- */
 class ApkGenerator(private val context: Context) {
 
-    fun generateApk(project: IconPackProject, mappings: List<IconMapping>): File? {
-        val exportDir = File(context.cacheDir, "exports")
-        if (!exportDir.exists()) exportDir.mkdirs()
-        val outputApk = File(exportDir, "${project.packageName}.apk")
-        val workspace = File(context.cacheDir, "build_${project.id}")
-        
+    private companion object {
+        // CandyBar's compiled drawable.xml in the bundled template lists these slots.
+        const val DASHBOARD_SLOT_COUNT = 100
+    }
+
+    class GenerationException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+    data class Progress(val step: Int, val message: String)
+
+    private data class TemplateSlot(
+        val index: Int,
+        val entryName: String
+    )
+
+    @Throws(GenerationException::class)
+    fun generateApk(
+        project: IconPackProject,
+        mappings: List<IconMapping>,
+        onProgress: (Progress) -> Unit = {}
+    ): File {
+        onProgress(Progress(1, "正在准备导出"))
+        val outputDir = StorageHelper.outputsDir
+        val safeName = project.name.replace("[^a-zA-Z0-9]".toRegex(), "_")
+        val outputApk = File(outputDir, "$safeName.apk")
+
+        val projectRoot = StorageHelper.getProjectDir(project.id)
+        val workspace = File(projectRoot, ".build")
+
         if (workspace.exists()) workspace.deleteRecursively()
-        workspace.mkdirs()
-        
+        check(workspace.mkdirs()) { "Unable to create the APK build workspace." }
+
         try {
             val unsignedApk = File(workspace, "unsigned.apk")
-            val baseApkStream = try { context.assets.open("base.apk") } catch (e: Exception) { null }
+            val baseApk = File(workspace, "template.apk")
+            try {
+                onProgress(Progress(2, "正在加载图标包模板"))
+                context.assets.open("base.apk").use { input ->
+                    FileOutputStream(baseApk).use(input::copyTo)
+                }
+            } catch (e: Exception) {
+                throw GenerationException("The CandyBar APK template is missing or unreadable.", e)
+            }
+
+            val mappedEntries = mappings.filter { it.targetPackageName.isNotBlank() }
+            val staticMappings = mappedEntries.filter { it.mappingType == 0 }
+            if (staticMappings.size != mappedEntries.size) {
+                throw GenerationException(
+                    "项目包含动态日历或动态时钟。当前导出模板尚未包含 CandyBar 所需的日期序列或时钟图层资源，无法安全导出。"
+                )
+            }
+            // Older projects only stored a package name. Resolve its real launcher Activity
+            // at export time so component-based launchers such as Lawnchair can match it.
+            val resolvedMappings = staticMappings.map(::resolveLaunchActivity)
 
             ZipOutputStream(FileOutputStream(unsignedApk)).use { zos ->
-                if (baseApkStream != null) {
-                    val tempBase = File(workspace, "temp_base.apk")
-                    baseApkStream.use { it.copyTo(FileOutputStream(tempBase)) }
-                    ZipFile(tempBase).use { zip ->
-                        zip.entries().asSequence().forEach { entry ->
-                            // Skip files we are going to replace or that conflict with our injection
-                            val name = entry.name
-                            val isMetadata = name == "res/xml/appfilter.xml" || 
-                                           name == "res/xml/drawable.xml" ||
-                                           name == "assets/appfilter.xml"
-                            val isIcon = name.startsWith("res/drawable") && 
-                                       (name.contains("icon_") || name.contains("iconmask") || name.contains("iconback") || name.contains("iconupon"))
-                            
-                            if (!isMetadata && !isIcon) {
-                                zos.putNextEntry(ZipEntry(name))
-                                zip.getInputStream(entry).use { it.copyTo(zos) }
-                                zos.closeEntry()
+                ZipFile(baseApk).use { zip ->
+                    onProgress(Progress(3, "正在写入图标与映射"))
+                    val slots = findTemplateSlots(zip)
+                    if (resolvedMappings.size > slots.size) {
+                        throw GenerationException(
+                            "This CandyBar template has ${slots.size} icon slots, but the project has ${resolvedMappings.size} icons."
+                        )
+                    }
+
+                    val replacements = slots.zip(resolvedMappings).associate { (slot, mapping) ->
+                        slot.entryName to File(mapping.iconPath)
+                    }
+                    val missingIcons = replacements.values.filterNot(File::isFile)
+                    if (missingIcons.isNotEmpty()) {
+                        throw GenerationException("One or more project icon files no longer exist.")
+                    }
+
+                    val resourceAppFilter = BinaryAppFilterWriter.build(
+                        mappings = resolvedMappings,
+                        slotIndices = slots.take(resolvedMappings.size).map(TemplateSlot::index)
+                    )
+                    val resourceDrawables = BinaryDrawableXmlWriter.build(
+                        mappings = resolvedMappings,
+                        slotIndices = slots.take(resolvedMappings.size).map(TemplateSlot::index)
+                    )
+                    val resourceReplacements = mapOf(
+                        "AndroidManifest.xml" to ApkManifestEditor.patch(
+                            zip.getInputStream(zip.getEntry("AndroidManifest.xml")).readBytes(),
+                            project.packageName,
+                            ((System.currentTimeMillis() / 1000L) % Int.MAX_VALUE).toInt().coerceAtLeast(1),
+                            project.name
+                        ),
+                        "res/xml/appfilter.xml" to resourceAppFilter,
+                        "res/xml/drawable.xml" to resourceDrawables,
+                        "res/xml-v26/drawable.xml" to resourceDrawables
+                    )
+                    val projectIcon = project.projectIconPath
+                        ?.let(::File)
+                        ?.takeIf(File::isFile)
+                    zip.entries().asSequence().forEach { entry ->
+                        if (
+                            shouldDiscardSignature(entry.name) ||
+                            entry.name == "assets/appfilter.xml"
+                        ) {
+                            return@forEach
+                        }
+                        val replacement = replacements[entry.name] ?: projectIcon?.takeIf {
+                            entry.name.matches(Regex("^res/mipmap[^/]*/ic_launcher\\.png$"))
+                        }
+                        val resourceReplacement = resourceReplacements[entry.name]
+                        val outputEntry = ZipEntry(entry.name).apply {
+                            if (replacement == null && resourceReplacement == null && entry.method == ZipEntry.STORED) {
+                                method = ZipEntry.STORED
+                                size = entry.size
+                                compressedSize = entry.size
+                                crc = entry.crc
                             }
                         }
+                        zos.putNextEntry(outputEntry)
+                        when {
+                            resourceReplacement != null -> zos.write(resourceReplacement)
+                            replacement != null -> replacement.inputStream().use { it.copyTo(zos) }
+                            else -> zip.getInputStream(entry).use { it.copyTo(zos) }
+                        }
+                        zos.closeEntry()
                     }
-                }
 
-                // 1. Inject appfilter.xml (Standard & CandyBar compatibility)
-                val appFilterContent = generateAppFilter(project, mappings)
-                injectStringAsset(zos, "res/xml/appfilter.xml", appFilterContent)
-                injectStringAsset(zos, "assets/appfilter.xml", appFilterContent)
-
-                // 2. Inject drawable.xml (Required for CandyBar Dashboard)
-                val drawableContent = generateDrawableXml(mappings)
-                injectStringAsset(zos, "res/xml/drawable.xml", drawableContent)
-
-                // 3. Inject Mapping Icons
-                mappings.forEach { mapping ->
-                    injectIcon(zos, mapping.iconPath, "icon_${mapping.id}")
-                }
-
-                // 4. Inject Global Styles (Mask, Back, Upon)
-                injectIcon(zos, project.iconMaskPath, "icon_mask")
-                injectIcon(zos, project.iconUponPath, "icon_upon")
-                project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.forEachIndexed { index, path ->
-                    injectIcon(zos, path, "icon_back${index + 1}")
+                    injectStringAsset(zos, "assets/appfilter.xml", generateAppFilter(project, resolvedMappings, slots))
                 }
             }
-            
-            // 5. Sign the resulting APK
-            ApkSignerUtil.sign(unsignedApk, outputApk)
+
+            onProgress(Progress(4, "正在签名 APK"))
+            ApkSignerUtil.sign(context, unsignedApk, outputApk)
+            onProgress(Progress(5, "正在完成导出"))
             return outputApk
         } catch (e: Exception) {
-            e.printStackTrace()
-            return null
+            outputApk.delete()
+            throw if (e is GenerationException) e else GenerationException("Unable to build the icon pack APK.", e)
+        } finally {
+            workspace.deleteRecursively()
         }
     }
 
@@ -88,48 +155,56 @@ class ApkGenerator(private val context: Context) {
         zos.closeEntry()
     }
 
-    private fun injectIcon(zos: ZipOutputStream, path: String?, name: String) {
-        if (path.isNullOrEmpty()) return
-        val iconFile = File(path)
-        if (iconFile.exists()) {
-            // We inject into multiple densities for better launcher support
-            listOf("res/drawable-nodpi-v4", "res/drawable-xxxhdpi-v4").forEach { folder ->
-                zos.putNextEntry(ZipEntry("$folder/$name.png"))
-                iconFile.inputStream().use { it.copyTo(zos) }
-                zos.closeEntry()
+    private fun findTemplateSlots(zip: ZipFile): List<TemplateSlot> {
+        val slotPattern = Regex("^res/drawable[^/]*/icon_(\\d+)\\.png$")
+        return zip.entries().asSequence()
+            .mapNotNull { entry ->
+                slotPattern.matchEntire(entry.name)?.let { match ->
+                    TemplateSlot(match.groupValues[1].toInt(), entry.name)
+                }
             }
-        }
+            .sortedBy(TemplateSlot::index)
+            .toList()
     }
 
-    private fun generateAppFilter(project: IconPackProject, mappings: List<IconMapping>): String {
+    private fun resolveLaunchActivity(mapping: IconMapping): IconMapping {
+        if (mapping.targetActivityName.isNotBlank()) return mapping
+        val activityName = context.packageManager
+            .getLaunchIntentForPackage(mapping.targetPackageName)
+            ?.component
+            ?.className
+            ?: return mapping
+        return mapping.copy(targetActivityName = activityName)
+    }
+
+    private fun shouldDiscardSignature(entryName: String): Boolean {
+        if (!entryName.startsWith("META-INF/", ignoreCase = true)) return false
+        val upperName = entryName.uppercase()
+        return upperName == "META-INF/MANIFEST.MF" ||
+            upperName.endsWith(".SF") ||
+            upperName.endsWith(".RSA") ||
+            upperName.endsWith(".DSA") ||
+            upperName.endsWith(".EC")
+    }
+
+    private fun generateAppFilter(
+        project: IconPackProject,
+        mappings: List<IconMapping>,
+        slots: List<TemplateSlot>
+    ): String {
         val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n")
         sb.append("    <scale factor=\"${project.scaleFactor}\" />\n")
-        
-        if (!project.iconMaskPath.isNullOrEmpty()) sb.append("    <iconmask img1=\"icon_mask\" />\n")
-        if (!project.iconUponPath.isNullOrEmpty()) sb.append("    <iconupon img1=\"icon_upon\" />\n")
-        
-        val backs = project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
-        if (backs.isNotEmpty()) {
-            sb.append("    <iconback ")
-            backs.forEachIndexed { index, _ -> sb.append("img${index + 1}=\"icon_back${index + 1}\" ") }
-            sb.append("/>\n")
-        }
 
-        mappings.forEach { mapping ->
-            sb.append("    <item component=\"ComponentInfo{${mapping.targetPackageName}/${mapping.targetActivityName}}\" drawable=\"icon_${mapping.id}\" />\n")
-        }
-        sb.append("</resources>")
-        return sb.toString()
-    }
-
-    /**
-     * Generates drawable.xml which tells templates like CandyBar which icons to show in the gallery.
-     */
-    private fun generateDrawableXml(mappings: List<IconMapping>): String {
-        val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n")
-        sb.append("    <category title=\"Icons\" />\n")
-        mappings.forEach { mapping ->
-            sb.append("    <item drawable=\"icon_${mapping.id}\" />\n")
+        mappings.zip(slots).forEach { (mapping, slot) ->
+            val activityName = mapping.targetActivityName.ifBlank {
+                "${mapping.targetPackageName}.MainActivity"
+            }.let { activity ->
+                if (activity.startsWith(".")) mapping.targetPackageName + activity else activity
+            }
+            sb.append(
+                "    <item component=\"ComponentInfo{${mapping.targetPackageName}/$activityName}\" " +
+                    "drawable=\"icon_${slot.index}\" />\n"
+            )
         }
         sb.append("</resources>")
         return sb.toString()

@@ -37,12 +37,12 @@ class MorphPolygonShape(
     ): Outline {
         val path = morph.toPath(progress = percentage).asComposePath()
         val bounds = path.getBounds()
-        
+
         matrix.reset()
         val scale = max(size.width / bounds.width, size.height / bounds.height)
         matrix.scale(scale, scale)
         matrix.translate(-bounds.left * scale, -bounds.top * scale)
-        
+
         path.transform(matrix)
         return Outline.Generic(path)
     }
@@ -67,10 +67,10 @@ fun MorphingButton(
         )
     }
     val morph = remember { Morph(shapeA, shapeB) }
-    
+
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    
+
     val progress by animateFloatAsState(
         targetValue = if (isPressed) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),

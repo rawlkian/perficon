@@ -11,10 +11,19 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 
-fun saveIconToInternalStorage(context: Context, uri: Uri, fileName: String): String? {
+/**
+ * Saves an icon to the project-specific icons directory in the public Perficon folder.
+ */
+fun saveIconToInternalStorage(context: Context, uri: Uri, fileName: String, projectId: Long = -1): String? {
     return try {
         val inputStream = context.contentResolver.openInputStream(uri)
-        val directory = File(context.filesDir, "icons")
+        val directory = if (projectId == -1L) {
+            // Fallback to internal if no project ID provided, or use a temp dir in Perficon
+            File(StorageHelper.rootDir, "Temp")
+        } else {
+            StorageHelper.getProjectIconsDir(projectId)
+        }
+        
         if (!directory.exists()) directory.mkdirs()
         
         val file = File(directory, fileName)
@@ -35,30 +44,45 @@ fun saveIconToInternalStorage(context: Context, uri: Uri, fileName: String): Str
  */
 fun exportFileToDownloads(context: Context, srcFile: File, fileName: String): String? {
     return try {
+        val outputDir = StorageHelper.outputsDir
+        val destInPerficon = File(outputDir, fileName)
+        if (srcFile.canonicalFile != destInPerficon.canonicalFile) {
+            srcFile.copyTo(destInPerficon, overwrite = true)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.android.package-archive")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-            
+
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            
-            uri?.let {
-                resolver.openOutputStream(it)?.use { outputStream ->
-                    srcFile.inputStream().use { inputStream ->
+            val uri = requireNotNull(
+                resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            ) { "Unable to create the Downloads entry." }
+
+            try {
+                requireNotNull(resolver.openOutputStream(uri)) { "Unable to open the Downloads entry." }.use { outputStream ->
+                    destInPerficon.inputStream().use { inputStream ->
                         inputStream.copyTo(outputStream)
                     }
                 }
-                "Download/$fileName"
+                resolver.update(uri, ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
             }
         } else {
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val destFile = File(downloadsDir, fileName)
-            srcFile.copyTo(destFile, overwrite = true)
-            destFile.absolutePath
+            File(downloadsDir, fileName).also { destination ->
+                destInPerficon.copyTo(destination, overwrite = true)
+            }
         }
+        destInPerficon.absolutePath
     } catch (e: Exception) {
         e.printStackTrace()
         null

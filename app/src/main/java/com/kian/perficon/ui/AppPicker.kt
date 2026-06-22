@@ -40,13 +40,13 @@ fun AppPicker(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select App", style = MaterialTheme.typography.headlineSmall) },
+        title = { Text("选择应用", style = MaterialTheme.typography.headlineSmall) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    label = { Text("Search apps...") },
+                    label = { Text("Search应用...") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.large
                 )
@@ -95,7 +95,7 @@ fun AppPicker(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text("关闭")
             }
         },
         shape = MaterialTheme.shapes.extraLarge

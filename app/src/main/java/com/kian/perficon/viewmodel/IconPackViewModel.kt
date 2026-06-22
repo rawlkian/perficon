@@ -9,12 +9,12 @@ import com.kian.perficon.model.IconMapping
 import com.kian.perficon.model.IconPackProject
 import com.kian.perficon.repository.IconPackRepository
 import com.kian.perficon.util.IconPackImporter
+import com.kian.perficon.util.StorageHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.zip.ZipFile
 
 class IconPackViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: IconPackRepository
@@ -36,29 +36,99 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
         emit(importer.getInstalledIconPacks())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun insertProject(name: String, packageName: String) = viewModelScope.launch {
-        repository.insertProject(IconPackProject(name = name, packageName = packageName))
+    fun insertProject(name: String, packageName: String, projectIconPath: String? = null) = viewModelScope.launch {
+        repository.insertProject(IconPackProject(name = name, packageName = packageName, projectIconPath = projectIconPath))
     }
 
     fun deleteProject(project: IconPackProject) = viewModelScope.launch {
         repository.deleteProject(project)
+        // Cleanup files
+        StorageHelper.getProjectDir(project.id).deleteRecursively()
     }
 
-    /**
-     * Returns a Flow for a specific project. 
-     * Refactored from StateFlow to simple Flow to prevent object creation overhead in getters.
-     */
+    fun duplicateProject(project: IconPackProject) = viewModelScope.launch(Dispatchers.IO) {
+        val newName = "${project.name} (Copy)"
+        val newPkg = "${project.packageName}.copy"
+        
+        // 1. Insert new project
+        val newProjectId = repository.insertProject(project.copy(id = 0, name = newName, packageName = newPkg))
+        
+        // 2. Setup folders
+        val oldIconsDir = StorageHelper.getProjectIconsDir(project.id)
+        val newIconsDir = StorageHelper.getProjectIconsDir(newProjectId)
+        newIconsDir.mkdirs()
+        
+        // 3. Duplicate Global Assets
+        val newMask = project.iconMaskPath?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                val newFile = File(newIconsDir, "mask_${System.currentTimeMillis()}.png")
+                file.copyTo(newFile)
+                newFile.absolutePath
+            } else null
+        }
+        val newUpon = project.iconUponPath?.let { path ->
+            val file = File(path)
+            if (file.exists()) {
+                val newFile = File(newIconsDir, "upon_${System.currentTimeMillis()}.png")
+                file.copyTo(newFile)
+                newFile.absolutePath
+            } else null
+        }
+        val newBacks = project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.mapNotNull { path ->
+            val file = File(path)
+            if (file.exists()) {
+                val newFile = File(newIconsDir, "back_${System.currentTimeMillis()}_${file.name}")
+                file.copyTo(newFile)
+                newFile.absolutePath
+            } else null
+        }?.joinToString(",")
+        val newProjectIcon = project.projectIconPath?.let { path ->
+            File(path).takeIf(File::isFile)?.let { file ->
+                val target = File(newIconsDir, "project_icon_${System.currentTimeMillis()}.png")
+                file.copyTo(target)
+                target.absolutePath
+            }
+        }
+        
+        // Update project with new asset paths
+        repository.updateProject(repository.getProjectById(newProjectId)!!.copy(
+            iconMaskPath = newMask,
+            iconUponPath = newUpon,
+            iconBackPaths = newBacks,
+            projectIconPath = newProjectIcon
+        ))
+
+        // 4. Duplicate Mappings
+        val oldMappings = repository.getMappingsForProject(project.id).first()
+        oldMappings.forEach { mapping ->
+            val oldFile = File(mapping.iconPath)
+            if (oldFile.exists()) {
+                val newFile = File(newIconsDir, "${mapping.targetPackageName}_${System.currentTimeMillis()}.png")
+                oldFile.copyTo(newFile)
+                repository.insertMapping(mapping.copy(id = 0, projectId = newProjectId, iconPath = newFile.absolutePath))
+            }
+        }
+    }
+
     fun getProjectById(id: Long): Flow<IconPackProject?> =
         repository.allProjects.map { projects -> projects.find { it.id == id } }
 
     fun getMappingsForProject(projectId: Long): Flow<List<IconMapping>> =
         repository.getMappingsForProject(projectId)
 
-    fun insertMapping(projectId: Long, targetPackage: String, targetActivity: String, iconPath: String) =
+    fun insertMapping(
+        projectId: Long,
+        iconName: String,
+        targetPackage: String,
+        targetActivity: String,
+        iconPath: String
+    ) =
         viewModelScope.launch {
             repository.insertMapping(
                 IconMapping(
                     projectId = projectId,
+                    iconName = iconName,
                     targetPackageName = targetPackage,
                     targetActivityName = targetActivity,
                     iconPath = iconPath
@@ -74,10 +144,6 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
         repository.deleteMapping(mapping)
     }
 
-    fun duplicateMapping(mapping: IconMapping) = viewModelScope.launch {
-        repository.insertMapping(mapping.copy(id = 0))
-    }
-
     fun updateMapping(mapping: IconMapping) = viewModelScope.launch {
         repository.updateMapping(mapping)
     }
@@ -88,8 +154,6 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
         targetPkg: String,
         progressFlow: MutableStateFlow<IconPackImporter.ImportProgress>
     ) = viewModelScope.launch {
-        // Project creation logic is now inside the importer's method for atomic import if needed, 
-        // but here we keep the structure for compatibility.
         val success = importer.importFromInstalledApp(sourcePkg, name, targetPkg, progressFlow)
         withContext(Dispatchers.Main) {
             if (!success) {

@@ -9,6 +9,7 @@ data class IconPackProject(
     val name: String,
     val packageName: String,
     val description: String = "",
+    val projectIconPath: String? = null,
     
     // Masking and styling for uncovered apps
     val iconMaskPath: String? = null,
