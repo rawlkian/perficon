@@ -1,0 +1,292 @@
+package com.kian.perficon.ui
+
+import android.content.Context
+import androidx.compose.material3.Text as MaterialText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.LocalTextStyle
+import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.Locale
+
+enum class AppLanguage(val storageValue: String) {
+    System("system"),
+    Chinese("zh"),
+    English("en");
+
+    companion object {
+        fun fromStorage(value: String?): AppLanguage = entries.firstOrNull { it.storageValue == value } ?: System
+    }
+}
+
+class AppSettings(context: Context) {
+    private val preferences = context.getSharedPreferences("perficon_settings", Context.MODE_PRIVATE)
+    val language = MutableStateFlow(AppLanguage.fromStorage(preferences.getString(LANGUAGE_KEY, null)))
+
+    fun setLanguage(value: AppLanguage) {
+        preferences.edit().putString(LANGUAGE_KEY, value.storageValue).apply()
+        language.value = value
+    }
+
+    private companion object {
+        const val LANGUAGE_KEY = "language"
+    }
+}
+
+val LocalAppLanguage = compositionLocalOf { AppLanguage.System }
+
+private fun AppLanguage.usesEnglish(): Boolean = when (this) {
+    AppLanguage.English -> true
+    AppLanguage.Chinese -> false
+    AppLanguage.System -> Locale.getDefault().language.startsWith("en")
+}
+
+@Composable
+fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontStyle: FontStyle? = null,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    textDecoration: TextDecoration? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1,
+    onTextLayout: ((TextLayoutResult) -> Unit)? = null,
+    style: TextStyle = LocalTextStyle.current
+) {
+    MaterialText(
+        text = localize(text, LocalAppLanguage.current),
+        modifier = modifier,
+        color = color,
+        fontSize = fontSize,
+        fontStyle = fontStyle,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        textDecoration = textDecoration,
+        textAlign = textAlign,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        maxLines = maxLines,
+        minLines = minLines,
+        onTextLayout = onTextLayout,
+        style = style
+    )
+}
+
+private fun localize(value: String, language: AppLanguage): String {
+    val english = language.usesEnglish()
+    if (english) {
+        englishText[value]?.let { return it }
+        return when {
+            value.startsWith("正在搜索 ") -> value.replaceFirst("正在搜索", "Searching")
+            value.startsWith("步骤 ") -> value.replaceFirst("步骤", "Step")
+            value.startsWith("已生成 ") -> value.replaceFirst("已生成", "Generated")
+            value.endsWith(" 日") -> "Day ${value.removeSuffix(" 日")}" 
+            value.startsWith("缩放：") -> "Scale: ${value.removePrefix("缩放：")}" 
+            value.startsWith("错误：") -> "Error: ${value.removePrefix("错误：")}" 
+            value.startsWith("已处理：") -> "Processed: ${value.removePrefix("已处理：")}" 
+            value.startsWith("背景：") -> "Backgrounds: ${value.removePrefix("背景：")}" 
+            value.startsWith("导入 ") -> "Import ${value.removePrefix("导入 ")}" 
+            value.startsWith("确定要删除“") -> "Delete ${value.removePrefix("确定要删除“").substringBefore("”")}? This action cannot be undone."
+            else -> value
+        }
+    }
+    chineseText[value]?.let { return it }
+    return when {
+        value.startsWith("Scale: ") -> "缩放：${value.removePrefix("Scale: ")}" 
+        value.startsWith("Search") -> value.replaceFirst("Search", "搜索")
+        value.startsWith("Error: ") -> "错误：${value.removePrefix("Error: ")}" 
+        value.startsWith("Processed: ") -> "已处理：${value.removePrefix("Processed: ")}" 
+        value.startsWith("Backgrounds: ") -> "背景：${value.removePrefix("Backgrounds: ")}" 
+        value.startsWith("Import ") -> "导入 ${value.removePrefix("Import ")}" 
+        value.startsWith("Restore default") -> "恢复默认${value.removePrefix("Restore default")}" 
+        value.startsWith("Are you sure you want to delete ") -> "确定删除${value.removePrefix("Are you sure you want to delete ").removeSuffix("? This action cannot be undone.")}吗？此操作无法撤销。"
+        else -> value
+    }
+}
+
+private val englishText = mapOf(
+    "需要存储访问权限" to "Storage permission required",
+    "授权访问" to "Grant access",
+    "新建项目" to "New project",
+    "我的图标包" to "My icon packs",
+    "创建图标包" to "Create icon pack",
+    "从零创建" to "Create from scratch",
+    "从空白项目开始" to "Start with a blank project",
+    "导入已安装图标包" to "Import installed icon pack",
+    "从设备中选择图标包" to "Choose an icon pack on this device",
+    "编辑" to "Edit",
+    "Activity" to "Activity",
+    "编辑项目" to "Edit project",
+    "保存" to "Save",
+    "删除" to "Delete",
+    "删除项目？" to "Delete project?",
+    "取消" to "Cancel",
+    "关闭" to "Close",
+    "确认" to "Confirm",
+    "复制" to "Duplicate",
+    "开始制作第一个图标包" to "Create your first icon pack",
+    "轻松设计并导出自定义图标。" to "Design and export custom icon packs.",
+    "开始使用" to "Get started",
+    "项目名称" to "Project name",
+    "项目包名" to "Package name",
+    "包名格式无效" to "Invalid package name",
+    "必填" to "Required",
+    "未选择项目图标" to "No project icon selected",
+    "已选择项目图标" to "Project icon selected",
+    "从图库选择" to "Choose from gallery",
+    "从文件选择" to "Choose from files",
+    "图标映射" to "Icon mappings",
+    "动态" to "Dynamic",
+    "样式" to "Style",
+    "搜索结果" to "Search results",
+    "搜索图标" to "Search icons",
+    "图标名称" to "Icon name",
+    "目标包名" to "Target package",
+    "目标 Activity" to "Target activity",
+    "包名" to "Package name",
+    "手动填写" to "Enter manually",
+    "未覆盖应用" to "Uncovered apps",
+    "从已安装应用填入包名" to "Use an installed app",
+    "图库" to "Gallery",
+    "文件" to "Files",
+    "快速生成" to "Quick generate",
+    "更换图标" to "Replace icon",
+    "编辑信息" to "Edit details",
+    "设为项目图标" to "Set as project icon",
+    "删除动态日历" to "Delete dynamic calendar",
+    "删除动态时钟" to "Delete dynamic clock",
+    "动态日历" to "Dynamic calendar",
+    "动态时钟" to "Dynamic clock",
+    "添加动态日历" to "Add dynamic calendar",
+    "添加动态时钟" to "Add dynamic clock",
+    "确认添加" to "Add",
+    "恢复缺省图标" to "Restore default icon",
+    "恢复缺省图层" to "Restore default layer",
+    "从图库更换" to "Replace from gallery",
+    "从文件更换" to "Replace from files",
+    "表盘" to "Clock face",
+    "时针" to "Hour hand",
+    "分针" to "Minute hand",
+    "秒针" to "Second hand",
+    "正在构建 APK" to "Building APK",
+    "正在创建动态日历" to "Creating dynamic calendar",
+    "正在创建动态时钟" to "Creating dynamic clock",
+    "正在生成 31 个日期图标" to "Generating 31 date icons",
+    "还没有动态图标" to "No dynamic icons yet",
+    "还没有图标映射" to "No icon mappings yet",
+    "暂无此类图标" to "No icons in this group",
+    "添加动态图标" to "Add dynamic icon",
+    "添加图标" to "Add icon",
+    "使用动态日历" to "Use dynamic calendar",
+    "使用动态时钟" to "Use dynamic clock",
+    "编辑动态素材" to "Edit dynamic assets",
+    "该包名已经有图标映射" to "This package already has an icon mapping",
+    "该包名已经有其他动态图标映射" to "This package already has another dynamic mapping",
+    "按日期切换图标的应用" to "Apps that change their icon by date",
+    "按当前时间旋转指针" to "Hands rotate with the current time",
+    "点击右下角添加动态日历或动态时钟。" to "Use the add menu to create a dynamic calendar or clock.",
+    "点击右下角菜单添加图标或快速生成。" to "Use the bottom-right menu to add an icon or generate one quickly.",
+    "将创建 1 至 31 日的缺省图标，并按 CandyBar 默认日历应用规则导出。" to "This creates default icons for days 1 to 31 and exports with CandyBar calendar rules.",
+    "将创建缺省表盘与指针图层，并按 CandyBar 默认时钟应用规则导出。" to "This creates default clock layers and exports with CandyBar clock rules.",
+    "将根据当前项目设置生成并签名图标包 APK。" to "This builds and signs an icon-pack APK using the current project settings.",
+    "将删除这组 1 至 31 日图标及其动态日历映射。" to "This deletes the 31 day icons and their dynamic calendar mapping.",
+    "将删除表盘、指针图层及其动态时钟映射。" to "This deletes the clock face, hand layers, and dynamic clock mapping.",
+    "请选择图片以生成日期图标" to "Choose an image to generate date icons",
+    "例如：音乐" to "Example: Music",
+    "统计信息" to "Statistics",
+    "导入完成" to "Import complete",
+    "已安装的图标包" to "Installed icon packs",
+    "未找到图标包" to "No icon packs found",
+    "添加背景" to "Add background",
+    "背景颜色" to "Background color",
+    "颜色" to "Color",
+    "图片" to "Image",
+    "原始图层" to "Original layer",
+    "标准图标" to "Standard icon",
+    "图标素材Select" to "Choose icon source",
+    "两种模式只决定 Source Image 如何提取；" to "Both modes only change how the source image is extracted.",
+    "点击预览以取色" to "Tap preview to pick a color",
+    "使用取色器" to "Use color picker",
+    "选择" to "Choose",
+    "确定" to "OK",
+    "正在导入图标..." to "Importing icons...",
+    "像素字体" to "Pixel font",
+    "确认导出" to "Confirm export",
+    "开始导出" to "Export",
+    "导出完成" to "Export complete",
+    "安装" to "Install",
+    "打开位置" to "Open location",
+    "设置" to "Settings",
+    "语言" to "Language",
+    "跟随系统" to "Follow system",
+    "中文" to "Chinese",
+    "英文" to "English",
+    "应用语言" to "App language",
+    "外观与偏好" to "Appearance and preferences",
+    "选择应用" to "Choose app",
+    "生成图标预览" to "Generated icon preview",
+    "保存" to "Save",
+    "源图像" to "Source image",
+    "相册" to "Gallery",
+    "应用图标" to "App icon",
+    "重置" to "Reset",
+    "模板图层" to "Template layers",
+    "背景" to "Background",
+    "蒙版" to "Mask",
+    "叠层" to "Overlay"
+)
+
+private val chineseText = mapOf(
+    "Project Name" to "项目名称",
+    "Package Name" to "项目包名",
+    "Import" to "导入",
+    "Importing Icons..." to "正在导入图标...",
+    "Import complete" to "导入完成",
+    "Processed:" to "已处理：",
+    "Icon Mask" to "图标蒙版",
+    "Backgrounds:" to "背景：",
+    "My icon packs" to "我的图标包",
+    "New project" to "新建项目",
+    "Create icon pack" to "创建图标包",
+    "Create from scratch" to "从零创建",
+    "Start with a blank project" to "从空白项目开始",
+    "Import installed icon pack" to "导入已安装图标包",
+    "Choose an icon pack on this device" to "从设备中选择图标包",
+    "No project icon selected" to "未选择项目图标",
+    "Project icon selected" to "已选择项目图标",
+    "Choose from gallery" to "从图库选择",
+    "Choose from files" to "从文件选择",
+    "Invalid package name" to "包名格式无效",
+    "Required" to "必填",
+    "Delete project?" to "删除项目？",
+    "Pixel font" to "像素字体",
+    "Fusion Pixel 10px" to "Fusion Pixel 10px 像素字体",
+    "Search应用..." to "搜索应用...",
+    "Perficon needs 'All Files Access' to manage your icon pack projects in the root folder (/Perficon)." to "Perficon 需要“所有文件访问权限”来管理 /Perficon 中的图标包项目。",
+    "Delete项目？" to "删除项目？",
+    "Restore default变换" to "恢复默认变换",
+    "1. Overlay" to "1. 叠层",
+    "2. Mask (Shape)" to "2. 蒙版（形状）",
+    "3. Background" to "3. 背景"
+)

@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -566,7 +565,11 @@ fun ProjectEditorScreen(
 
         if (isCreatingDefaultCalendar) {
             Dialog(onDismissRequest = {}) {
-                Card(shape = RoundedCornerShape(8.dp)) {
+                Card(
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("正在创建动态日历", style = MaterialTheme.typography.titleMedium)
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -628,7 +631,11 @@ fun ProjectEditorScreen(
 
         if (isCreatingDefaultClock) {
             Dialog(onDismissRequest = {}) {
-                Card(shape = RoundedCornerShape(8.dp)) {
+                Card(
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("正在创建动态时钟", style = MaterialTheme.typography.titleMedium)
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -714,7 +721,11 @@ fun ProjectEditorScreen(
 @Composable
 private fun ExportProgressDialog(progress: ApkGenerator.Progress) {
     Dialog(onDismissRequest = {}) {
-        Card(shape = RoundedCornerShape(8.dp)) {
+        Card(
+            shape = MaterialTheme.shapes.medium,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
             Column(
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -1303,7 +1314,13 @@ private fun CalendarDynamicCard(
 ) {
     val frames = remember(mapping.iconPath, mapping.extraInfo) { DynamicIconAssets.calendarFrames(mapping) }
     val rowCount = (DynamicIconAssets.CALENDAR_DAY_COUNT + 3) / 4
-    Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    val calendarGridHeight = 98.dp * rowCount + 12.dp * (rowCount - 1) + 8.dp
+    Card(
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.CalendarMonth, null, tint = MaterialTheme.colorScheme.primary)
@@ -1323,7 +1340,7 @@ private fun CalendarDynamicCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 userScrollEnabled = false,
-                modifier = Modifier.height(106.dp * rowCount).fillMaxWidth()
+                modifier = Modifier.height(calendarGridHeight).fillMaxWidth()
             ) {
                 items((1..DynamicIconAssets.CALENDAR_DAY_COUNT).toList(), key = { it }) { day ->
                     CalendarFrameItem(
@@ -1372,7 +1389,12 @@ private fun ClockDynamicCard(
     onDelete: (IconMapping) -> Unit
 ) {
     val layers = remember(mapping.iconPath, mapping.extraInfo) { DynamicIconAssets.clockLayers(mapping) }
-    Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.AccessTime, null, tint = MaterialTheme.colorScheme.primary)
@@ -1453,7 +1475,12 @@ private fun DynamicTypeCard(
     onEditDynamic: (IconMapping) -> Unit,
     onSetProjectIcon: (IconMapping) -> Unit
 ) {
-    Card(shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
@@ -1490,6 +1517,39 @@ fun MappingGridFixed(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit,
 
 @Composable
 fun MappingGridWithScrollbar(mappings: List<IconMapping>, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onEditDynamic: (IconMapping) -> Unit, enableDynamicActions: Boolean = true, onSetProjectIcon: (IconMapping) -> Unit) {
+    if (mappings.isEmpty()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier.size(84.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Image,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("还没有图标映射", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "点击右下角菜单添加图标或快速生成。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
+        return
+    }
     val state = rememberLazyGridState()
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(state = state, columns = GridCells.Fixed(5), contentPadding = PaddingValues(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
@@ -1529,7 +1589,11 @@ fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, 
     val fr = remember { FocusRequester() }
     LaunchedEffect(Unit) { fr.requestFocus() }
     Dialog(onD) {
-        Card(shape = RoundedCornerShape(28.dp), elevation = CardDefaults.cardElevation(8.dp)) {
+        Card(
+            shape = MaterialTheme.shapes.medium,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
             Column(Modifier.padding(24.dp), Arrangement.spacedBy(16.dp)) {
                 Text("搜索图标", style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(q, onQ, Modifier.fillMaxWidth().focusRequester(fr), placeholder = { Text("例如：音乐") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
@@ -1608,7 +1672,11 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), Arrangement.spacedBy(24.dp)) {
         Text("样式", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) { Column(Modifier.padding(16.dp)) {
             Text("缩放：${(project.scaleFactor * 100).toInt()}%")
             Slider(value = project.scaleFactor, onValueChange = { onUpdate(project.copy(scaleFactor = it)) }, valueRange = 0.5f..1.5f)
         } }
@@ -1631,7 +1699,11 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
 
 @Composable
 fun IconSettingItem(title: String, desc: String, path: String?, onPick: () -> Unit, onRemove: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Bold)
@@ -1640,8 +1712,16 @@ fun IconSettingItem(title: String, desc: String, path: String?, onPick: () -> Un
             if (path != null) {
                 Box {
                     AsyncImage(model = File(path), null, Modifier.size(56.dp).clip(MaterialTheme.shapes.medium), contentScale = ContentScale.Crop)
-                    IconButton(onRemove, Modifier.align(Alignment.TopEnd).size(20.dp).background(MaterialTheme.colorScheme.errorContainer, CircleShape)) {
-                        Icon(Icons.Default.Close, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.error)
+                    Surface(
+                        onClick = onRemove,
+                        modifier = Modifier.align(Alignment.TopEnd).size(28.dp),
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Close, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             } else {

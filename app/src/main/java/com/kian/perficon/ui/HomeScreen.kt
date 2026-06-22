@@ -22,18 +22,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import coil.compose.AsyncImage
 import com.kian.perficon.model.IconPackProject
 import com.kian.perficon.viewmodel.IconPackViewModel
 import com.kian.perficon.util.IconPackImporter
 import com.kian.perficon.util.saveIconToInternalStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: IconPackViewModel,
-    onNavigateToProject: (Long) -> Unit
+    onNavigateToProject: (Long) -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     val projects by viewModel.allProjects.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
@@ -59,7 +62,7 @@ fun HomeScreen(
         AlertDialog(
             onDismissRequest = { },
             title = { Text("需要存储访问权限") },
-            text = { Text("Perficon needs 'All Files Access' to manage your icon pack projects in the root folder (/Perficon).") },
+            text = { Text("Perficon 需要“所有文件访问权限”来管理 /Perficon 中的图标包项目。") },
             confirmButton = {
                 Button(onClick = { 
                     com.kian.perficon.util.StorageHelper.requestAllFilesAccess(context)
@@ -74,11 +77,16 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(
-                title = { Text("Perficon", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
+            CenterAlignedTopAppBar(
+                title = { Text("Perficon", style = MaterialTheme.typography.titleLarge) },
+                actions = {
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.primary
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         },
@@ -89,7 +97,7 @@ fun HomeScreen(
                 text = { Text("新建项目") },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = MaterialTheme.shapes.large
+                shape = MaterialTheme.shapes.medium
             )
         }
     ) { padding ->
@@ -100,9 +108,9 @@ fun HomeScreen(
                 Text(
                     "我的图标包",
                     modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.secondary,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
                 )
                 
                 LazyColumn(
@@ -133,13 +141,13 @@ fun HomeScreen(
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp, start = 16.dp, end = 16.dp, top = 8.dp)) {
                     Text("创建图标包", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
                     ListItem(
-                        headlineContent = { Text("从零Create") },
+                        headlineContent = { Text("从零创建") },
                         supportingContent = { Text("从空白项目开始") },
                         leadingContent = { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, null) } } },
                         modifier = Modifier.clickable { showBottomSheet = false; showAddDialog = true }
                     )
                     ListItem(
-                        headlineContent = { Text("从Installed Apps导入") },
+                        headlineContent = { Text("导入已安装图标包") },
                         supportingContent = { Text("从设备中选择图标包") },
                         leadingContent = { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.size(48.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Apps, null) } } },
                         modifier = Modifier.clickable { showBottomSheet = false; showInstalledPacksDialog = true }
@@ -169,8 +177,8 @@ fun HomeScreen(
 
         if (pendingInstalledPack != null) {
             AddProjectDialog(
-                title = "Import ${pendingInstalledPack?.name}",
-                confirmLabel = "Import",
+                title = "导入 ${pendingInstalledPack?.name}",
+                confirmLabel = "导入",
                 onDismiss = { pendingInstalledPack = null },
                 onConfirm = { name, pkg, _, _, _ ->
                     val pack = pendingInstalledPack ?: return@AddProjectDialog
@@ -192,8 +200,8 @@ fun HomeScreen(
         if (projectToDelete != null) {
             AlertDialog(
                 onDismissRequest = { projectToDelete = null },
-                title = { Text("Delete项目？") },
-                text = { Text("Are you sure you want to delete '${projectToDelete?.name}'? This action cannot be undone.") },
+                title = { Text("删除项目？") },
+                text = { Text("确定要删除“${projectToDelete?.name}”吗？此操作无法撤销。") },
                 confirmButton = { Button(onClick = { viewModel.deleteProject(projectToDelete!!); projectToDelete = null }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") } },
                 dismissButton = { TextButton(onClick = { projectToDelete = null }) { Text("取消") } },
                 shape = MaterialTheme.shapes.extraLarge
@@ -214,17 +222,22 @@ fun ExpressiveProjectItem(
 
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
-        tonalElevation = 4.dp
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
-        Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.large), contentAlignment = Alignment.Center) {
-                Text(project.name.take(1).uppercase(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
+                val projectIcon = project.projectIconPath?.let(::File)?.takeIf(File::isFile)
+                if (projectIcon != null) {
+                    AsyncImage(model = projectIcon, contentDescription = null, modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.small))
+                } else {
+                    Text(project.name.take(1).uppercase(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = project.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                Text(text = project.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                 Text(text = project.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             
@@ -292,8 +305,8 @@ fun AddProjectDialog(
         title = { Text(title, style = MaterialTheme.typography.headlineMedium) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it; nameError = if (it.isBlank()) "必填" else null }, label = { Text("Project Name") }, isError = nameError != null, supportingText = nameError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = pkg, onValueChange = { pkg = it; pkgError = if (!it.contains(".")) "Package格式无效" else null }, label = { Text("Package Name") }, isError = pkgError != null, supportingText = pkgError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = name, onValueChange = { name = it; nameError = if (it.isBlank()) "必填" else null }, label = { Text("项目名称") }, isError = nameError != null, supportingText = nameError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = pkg, onValueChange = { pkg = it; pkgError = if (!it.contains(".")) "包名格式无效" else null }, label = { Text("项目包名") }, isError = pkgError != null, supportingText = pkgError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
                 Text(if (iconPath == null) "未选择项目图标" else "已选择项目图标", style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("从图库选择") }
@@ -322,17 +335,17 @@ fun AddProjectDialog(
 
 @Composable
 fun ImportProgressDialog(progress: IconPackImporter.ImportProgress, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = { if (progress.isFinished) onDismiss() }, title = { Text(if (progress.isFinished) "导入完成" else "Importing Icons...") },
+    AlertDialog(onDismissRequest = { if (progress.isFinished) onDismiss() }, title = { Text(if (progress.isFinished) "导入完成" else "正在导入图标...") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (progress.error != null) { Text("Error: ${progress.error}", color = MaterialTheme.colorScheme.error) } 
+                if (progress.error != null) { Text("错误：${progress.error}", color = MaterialTheme.colorScheme.error) } 
                 else {
                     LinearProgressIndicator(progress = if (progress.totalItems > 0) progress.currentItem.toFloat() / progress.totalItems else 0f, modifier = Modifier.fillMaxWidth())
-                    Text("Processed: ${progress.currentItem} / ${progress.totalItems}")
+                    Text("已处理：${progress.currentItem} / ${progress.totalItems}")
                     HorizontalDivider()
-                    ProgressStatusItem("Icon Mask", progress.hasMask)
+                    ProgressStatusItem("图标蒙版", progress.hasMask)
                     ProgressStatusItem("图标Overlay", progress.hasUpon)
-                    ProgressStatusItem("Backgrounds: ${progress.backCount}", progress.backCount > 0)
+                    ProgressStatusItem("背景：${progress.backCount}", progress.backCount > 0)
                 }
             }
         },

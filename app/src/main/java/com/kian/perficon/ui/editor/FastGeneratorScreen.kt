@@ -53,7 +53,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -78,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.kian.perficon.model.IconPackProject
 import com.kian.perficon.ui.AppPicker
+import com.kian.perficon.ui.Text
 import com.kian.perficon.util.StorageHelper
 import com.kian.perficon.util.saveIconToInternalStorage
 import java.io.File

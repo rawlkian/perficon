@@ -6,7 +6,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -15,7 +18,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.kian.perficon.ui.HomeScreen
+import com.kian.perficon.ui.AppLanguage
+import com.kian.perficon.ui.AppSettings
+import com.kian.perficon.ui.LocalAppLanguage
 import com.kian.perficon.ui.ProjectEditorScreen
+import com.kian.perficon.ui.SettingsScreen
 import com.kian.perficon.ui.editor.FastGeneratorScreen
 import com.kian.perficon.ui.theme.PerficonTheme
 import com.kian.perficon.viewmodel.IconPackViewModel
@@ -27,15 +34,19 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val appSettings = remember { AppSettings(applicationContext) }
+            val language by appSettings.language.collectAsState()
             PerficonTheme {
-                MainApp()
+                CompositionLocalProvider(LocalAppLanguage provides language) {
+                    MainApp(appSettings)
+                }
             }
         }
     }
 }
 
 @Composable
-fun MainApp() {
+fun MainApp(appSettings: AppSettings) {
     val navController = rememberNavController()
     val viewModel: IconPackViewModel = viewModel()
     val scope = rememberCoroutineScope()
@@ -46,7 +57,16 @@ fun MainApp() {
                 viewModel = viewModel,
                 onNavigateToProject = { projectId ->
                     navController.navigate("editor/$projectId")
-                }
+                },
+                onNavigateToSettings = { navController.navigate("settings") }
+            )
+        }
+        composable("settings") {
+            val language by appSettings.language.collectAsState()
+            SettingsScreen(
+                language = language,
+                onLanguageChange = appSettings::setLanguage,
+                onBack = { navController.popBackStack() }
             )
         }
         composable(
