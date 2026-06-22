@@ -156,12 +156,15 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
         sourcePkg: String, 
         name: String, 
         targetPkg: String,
+        projectIconPath: String? = null,
         progressFlow: MutableStateFlow<IconPackImporter.ImportProgress>
     ) = viewModelScope.launch {
-        val success = importer.importFromInstalledApp(sourcePkg, name, targetPkg, progressFlow)
+        val success = importer.importFromInstalledApp(sourcePkg, name, targetPkg, projectIconPath, progressFlow)
         withContext(Dispatchers.Main) {
             if (!success) {
-                Toast.makeText(getApplication(), "Import failed or partially completed", Toast.LENGTH_SHORT).show()
+                val currentLang = com.kian.perficon.ui.AppSettings(getApplication()).language.value
+                val localizedMsg = com.kian.perficon.ui.localize("导入失败或部分完成", currentLang)
+                Toast.makeText(getApplication(), localizedMsg, Toast.LENGTH_SHORT).show()
             }
         }
     }

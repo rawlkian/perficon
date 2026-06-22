@@ -93,7 +93,7 @@ fun Text(
     )
 }
 
-private fun localize(value: String, language: AppLanguage): String {
+fun localize(value: String, language: AppLanguage): String {
     val english = language.usesEnglish()
     if (english) {
         englishText[value]?.let { return it }
@@ -108,6 +108,23 @@ private fun localize(value: String, language: AppLanguage): String {
             value.startsWith("背景：") -> "Backgrounds: ${value.removePrefix("背景：")}" 
             value.startsWith("导入 ") -> "Import ${value.removePrefix("导入 ")}" 
             value.startsWith("确定要删除“") -> "Delete ${value.removePrefix("确定要删除“").substringBefore("”")}? This action cannot be undone."
+            value.endsWith(" 已保存到下载目录") -> "${value.removeSuffix(" 已保存到下载目录")} saved to downloads directory"
+            value.startsWith("当前模板最多支持 ") && value.endsWith(" 个动态日历图标。") -> {
+                val num = value.removePrefix("当前模板最多支持 ").removeSuffix(" 个动态日历图标。")
+                "The current template supports a maximum of $num dynamic calendar icons."
+            }
+            value.startsWith("当前模板最多支持 ") && value.endsWith(" 个动态时钟图标。") -> {
+                val num = value.removePrefix("当前模板最多支持 ").removeSuffix(" 个动态时钟图标。")
+                "The current template supports a maximum of $num dynamic clock icons."
+            }
+            value.startsWith("模板只包含 ") && value.endsWith(" 组完整的动态日历资源。") -> {
+                val num = value.removePrefix("模板只包含 ").removeSuffix(" 组完整的动态日历资源。")
+                "The template only contains $num complete dynamic calendar asset sets."
+            }
+            value.startsWith("模板只包含 ") && value.endsWith(" 组完整的动态时钟资源。") -> {
+                val num = value.removePrefix("模板只包含 ").removeSuffix(" 组完整的动态时钟资源。")
+                "The template only contains $num complete dynamic clock asset sets."
+            }
             else -> value
         }
     }
@@ -121,6 +138,13 @@ private fun localize(value: String, language: AppLanguage): String {
         value.startsWith("Import ") -> "导入 ${value.removePrefix("Import ")}" 
         value.startsWith("Restore default") -> "恢复默认${value.removePrefix("Restore default")}" 
         value.startsWith("Are you sure you want to delete ") -> "确定删除${value.removePrefix("Are you sure you want to delete ").removeSuffix("? This action cannot be undone.")}吗？此操作无法撤销。"
+        value.endsWith(" saved to downloads directory") -> "${value.removeSuffix(" saved to downloads directory")} 已保存到下载目录"
+        value.startsWith("This CandyBar template has ") && value.contains(" icon slots, but the project has ") -> {
+            val parts = value.removePrefix("This CandyBar template has ").split(" icon slots, but the project has ")
+            val slots = parts.firstOrNull() ?: ""
+            val icons = parts.getOrNull(1)?.removeSuffix(" icons.") ?: ""
+            "该 CandyBar 模板只有 $slots 个图标槽位，但项目有 $icons 个图标。"
+        }
         else -> value
     }
 }
@@ -215,6 +239,10 @@ private val englishText = mapOf(
     "请选择图片以生成日期图标" to "Choose an image to generate date icons",
     "例如：音乐" to "Example: Music",
     "统计信息" to "Statistics",
+    "图标总数" to "Total icons",
+    "已安装应用" to "Installed apps",
+    "已覆盖" to "Covered",
+    "未覆盖" to "Uncovered",
     "导入完成" to "Import complete",
     "已安装的图标包" to "Installed icon packs",
     "未找到图标包" to "No icon packs found",
@@ -224,7 +252,7 @@ private val englishText = mapOf(
     "图片" to "Image",
     "原始图层" to "Original layer",
     "标准图标" to "Standard icon",
-    "图标素材Select" to "Choose icon source",
+    "选择图标来源" to "Choose icon source",
     "两种模式只决定 Source Image 如何提取；" to "Both modes only change how the source image is extracted.",
     "点击预览以取色" to "Tap preview to pick a color",
     "使用取色器" to "Use color picker",
@@ -254,7 +282,33 @@ private val englishText = mapOf(
     "模板图层" to "Template layers",
     "背景" to "Background",
     "蒙版" to "Mask",
-    "叠层" to "Overlay"
+    "叠层" to "Overlay",
+    "Perficon 需要“所有文件访问权限”来管理 /Perficon 中的图标包项目。" to "Perficon needs 'All Files Access' to manage your icon pack projects in the root folder (/Perficon).",
+    "无法读取图片或生成日期图标，请换一张图片后重试。" to "Failed to read image or generate date icons, please try another image.",
+    "图标蒙版" to "Icon Mask",
+    "图标叠层" to "Icon Overlay",
+    "搜索应用..." to "Search apps...",
+    "恢复默认变换" to "Restore default transform",
+    "恢复默认背景" to "Restore default background",
+    "两种模式只决定 Source Image 如何提取；之后都会统一经过 Background、模板 Mask 和 Overlay。" to "Both modes only change how the source image is extracted; they will all go through Background, template Mask, and Overlay.",
+    "无法保存日期图标" to "Failed to save date icon",
+    "无法保存时钟图层" to "Failed to save clock layer",
+    "APK 构建失败。" to "APK build failed.",
+    "无法恢复缺省日期图标" to "Failed to restore default date icon",
+    "无法恢复缺省时钟图层" to "Failed to restore default clock layer",
+    "无法创建缺省动态时钟图标" to "Failed to create default dynamic clock icon",
+    "无法创建缺省动态日历图标" to "Failed to create default dynamic calendar icon",
+    "无法打开系统安装器" to "Failed to open system installer",
+    "无法打开下载目录" to "Failed to open downloads directory",
+    "全部图标" to "All icons",
+    "导入失败或部分完成" to "Import failed or partially completed",
+    "正在准备导出" to "Preparing export",
+    "正在加载图标包模板" to "Loading icon pack template",
+    "正在写入图标与映射" to "Writing icons and mappings",
+    "正在签名 APK" to "Signing APK",
+    "正在完成导出" to "Completing export",
+    "正在删除项目" to "Deleting project",
+    "正在清理项目文件与数据库..." to "Cleaning up project files and database..."
 )
 
 private val chineseText = mapOf(
@@ -282,10 +336,7 @@ private val chineseText = mapOf(
     "Delete project?" to "删除项目？",
     "Pixel font" to "像素字体",
     "Fusion Pixel 10px" to "Fusion Pixel 10px 像素字体",
-    "Search应用..." to "搜索应用...",
     "Perficon needs 'All Files Access' to manage your icon pack projects in the root folder (/Perficon)." to "Perficon 需要“所有文件访问权限”来管理 /Perficon 中的图标包项目。",
-    "Delete项目？" to "删除项目？",
-    "Restore default变换" to "恢复默认变换",
     "1. Overlay" to "1. 叠层",
     "2. Mask (Shape)" to "2. 蒙版（形状）",
     "3. Background" to "3. 背景"

@@ -146,13 +146,15 @@ class ApkGenerator(private val context: Context) {
                         clockSlotIndices = expandedClockSlotIndices,
                         scaleFactor = project.scaleFactor
                     )
+                    val currentLang = com.kian.perficon.ui.AppSettings(context).language.value
                     val resourceDrawables = BinaryDrawableXmlWriter.build(
                         staticMappings = resolvedMappings,
                         staticSlotIndices = slots.take(resolvedMappings.size).map(TemplateSlot::index),
                         calendarMappings = resolvedCalendars,
                         calendarSlotIndices = calendarSlotIndices,
                         clockMappings = resolvedClocks,
-                        clockSlotIndices = clockSlotIndices
+                        clockSlotIndices = clockSlotIndices,
+                        language = currentLang
                     )
                     val resourceReplacements = mapOf(
                         "AndroidManifest.xml" to ApkManifestEditor.patch(

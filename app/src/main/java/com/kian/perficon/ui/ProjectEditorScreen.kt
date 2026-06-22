@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -45,7 +46,7 @@ import androidx.core.graphics.drawable.toBitmap
 import coil.compose.AsyncImage
 import com.kian.perficon.model.IconMapping
 import com.kian.perficon.model.IconPackProject
-import com.kian.perficon.ui.components.VerticalScrollbar
+import com.kian.perficon.ui.components.*
 import com.kian.perficon.util.AppInfo
 import com.kian.perficon.util.ApkGenerator
 import com.kian.perficon.util.DynamicIconAssets
@@ -118,6 +119,7 @@ fun ProjectEditorScreen(
     
     var selectedTab by remember { mutableStateOf(0) }
     val context = LocalContext.current
+    val currentLanguage = LocalAppLanguage.current
     val scope = rememberCoroutineScope()
 
     var searchQuery by remember { mutableStateOf("") }
@@ -221,7 +223,7 @@ fun ProjectEditorScreen(
                     DynamicIconAssets.saveAsset(context, uri, projectId, "calendar_custom_${target.day}")
                 }
                 if (path == null) {
-                    Toast.makeText(context, "无法保存日期图标", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, localize("无法保存日期图标", currentLanguage), Toast.LENGTH_SHORT).show()
                 } else {
                     viewModel.updateMapping(DynamicIconAssets.withCalendarFrame(target.mapping, target.day, path))
                 }
@@ -238,7 +240,7 @@ fun ProjectEditorScreen(
                     DynamicIconAssets.saveAsset(context, uri, projectId, "clock_custom_${target.layer.resourceName}")
                 }
                 if (path == null) {
-                    Toast.makeText(context, "无法保存时钟图层", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, localize("无法保存时钟图层", currentLanguage), Toast.LENGTH_SHORT).show()
                 } else {
                     viewModel.updateMapping(DynamicIconAssets.withClockLayer(target.mapping, target.layer, path))
                 }
@@ -262,7 +264,7 @@ fun ProjectEditorScreen(
                 }
                 completedApk = apkFile
             } catch (e: Exception) {
-                Toast.makeText(context, e.message ?: "APK 构建失败。", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, localize(e.message ?: "APK 构建失败。", currentLanguage), Toast.LENGTH_LONG).show()
             } finally {
                 exportProgress = null
             }
@@ -274,15 +276,17 @@ fun ProjectEditorScreen(
             if (isSearchActive && !isSearchOverlayVisible) {
                 CenterAlignedTopAppBar(
                     title = { Text("搜索结果") },
-                    navigationIcon = { IconButton(onClick = { isSearchActive = false; searchQuery = "" }) { Icon(Icons.Default.ArrowBack, null) } }
+                    navigationIcon = { RetroIconButton(onClick = { isSearchActive = false; searchQuery = "" }, modifier = Modifier.padding(start = 8.dp)) { Icon(Icons.Default.ArrowBack, null) } }
                 )
             } else {
                 CenterAlignedTopAppBar(
                     title = { Text(project?.name ?: "编辑器") },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+                    navigationIcon = { RetroIconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp)) { Icon(Icons.Default.ArrowBack, null) } },
                     actions = {
-                        IconButton(onClick = { showProjectEditDialog = true }) { Icon(Icons.Default.Edit, "编辑项目") }
-                        IconButton(onClick = { showExportConfirmation = true }) { Icon(Icons.Default.Build, "导出") }
+                        RetroIconButton(onClick = { showProjectEditDialog = true }) { Icon(Icons.Default.Edit, "编辑项目") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroIconButton(onClick = { showExportConfirmation = true }) { Icon(Icons.Default.Build, "导出") }
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
                 )
             }
@@ -290,7 +294,7 @@ fun ProjectEditorScreen(
         floatingActionButton = {
             Box {
                 if (isSearchActive) {
-                    FloatingActionButton(
+                    RetroFAB(
                         onClick = { isSearchActive = false; searchQuery = "" },
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.error,
@@ -356,7 +360,7 @@ fun ProjectEditorScreen(
                                         DynamicIconAssets.restoreDefaultCalendarFrame(context, projectId, day)
                                     }
                                     if (path == null) {
-                                        Toast.makeText(context, "无法恢复缺省日期图标", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, localize("无法恢复缺省日期图标", currentLanguage), Toast.LENGTH_SHORT).show()
                                     } else {
                                         viewModel.updateMapping(DynamicIconAssets.withCalendarFrame(mapping, day, path))
                                     }
@@ -381,7 +385,7 @@ fun ProjectEditorScreen(
                                         DynamicIconAssets.restoreDefaultClockLayer(context, projectId, layer)
                                     }
                                     if (path == null) {
-                                        Toast.makeText(context, "无法恢复缺省时钟图层", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, localize("无法恢复缺省时钟图层", currentLanguage), Toast.LENGTH_SHORT).show()
                                     } else {
                                         viewModel.updateMapping(DynamicIconAssets.withClockLayer(mapping, layer, path))
                                     }
@@ -428,18 +432,27 @@ fun ProjectEditorScreen(
         }
 
         if (showExportConfirmation) {
-            AlertDialog(
-                onDismissRequest = { showExportConfirmation = false },
-                title = { Text("确认导出") },
-                text = { Text("将根据当前项目设置生成并签名图标包 APK。") },
-                confirmButton = {
-                    Button(onClick = {
-                        showExportConfirmation = false
-                        buildAndShareApk()
-                    }) { Text("开始导出") }
-                },
-                dismissButton = { TextButton(onClick = { showExportConfirmation = false }) { Text("取消") } }
-            )
+            RetroDialog(
+                onDismissRequest = { showExportConfirmation = false }
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("确认导出", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("将根据当前项目设置生成并签名图标包 APK。")
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        RetroOutlinedButton(onClick = { showExportConfirmation = false }) { Text("取消") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroButton(onClick = {
+                            showExportConfirmation = false
+                            buildAndShareApk()
+                        }) { Text("开始导出") }
+                    }
+                }
+            }
         }
         
         if (showAddDialog) {
@@ -528,135 +541,167 @@ fun ProjectEditorScreen(
         }
 
         if (showDefaultCalendarConfirmation) {
-            AlertDialog(
-                onDismissRequest = { showDefaultCalendarConfirmation = false },
-                title = { Text("添加动态日历") },
-                text = { Text("将创建 1 至 31 日的缺省图标，并按 CandyBar 默认日历应用规则导出。") },
-                confirmButton = {
-                    Button(onClick = {
-                        showDefaultCalendarConfirmation = false
-                        isCreatingDefaultCalendar = true
-                        scope.launch {
-                            val frames = withContext(Dispatchers.IO) {
-                                DynamicIconAssets.createDefaultCalendarFrames(context, projectId)
-                            }
-                            isCreatingDefaultCalendar = false
-                            if (frames == null) {
-                                Toast.makeText(context, "无法创建缺省动态日历图标", Toast.LENGTH_LONG).show()
-                            } else {
-                                viewModel.insertMapping(
-                                    IconMapping(
-                                        projectId = projectId,
-                                        iconName = "动态日历",
-                                        targetPackageName = DynamicIconDefaults.DEFAULT_CALENDAR_MAPPING_PACKAGE,
-                                        targetActivityName = "",
-                                        iconPath = frames.first(),
-                                        mappingType = 1,
-                                        extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+            RetroDialog(
+                onDismissRequest = { showDefaultCalendarConfirmation = false }
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("添加动态日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("将创建 1 至 31 日的缺省图标，并按 CandyBar 默认日历应用规则导出。")
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        RetroOutlinedButton(onClick = { showDefaultCalendarConfirmation = false }) { Text("取消") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroButton(onClick = {
+                            showDefaultCalendarConfirmation = false
+                            isCreatingDefaultCalendar = true
+                            scope.launch {
+                                val frames = withContext(Dispatchers.IO) {
+                                    DynamicIconAssets.createDefaultCalendarFrames(context, projectId)
+                                }
+                                isCreatingDefaultCalendar = false
+                                if (frames == null) {
+                                    Toast.makeText(context, localize("无法创建缺省动态日历图标", currentLanguage), Toast.LENGTH_LONG).show()
+                                } else {
+                                    viewModel.insertMapping(
+                                        IconMapping(
+                                            projectId = projectId,
+                                            iconName = "动态日历",
+                                            targetPackageName = DynamicIconDefaults.DEFAULT_CALENDAR_MAPPING_PACKAGE,
+                                            targetActivityName = "",
+                                            iconPath = frames.first(),
+                                            mappingType = 1,
+                                            extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+                                        )
                                     )
-                                )
+                                }
                             }
-                        }
-                    }) { Text("确认添加") }
-                },
-                dismissButton = { TextButton(onClick = { showDefaultCalendarConfirmation = false }) { Text("取消") } }
-            )
+                        }) { Text("确认添加") }
+                    }
+                }
+            }
         }
 
         if (isCreatingDefaultCalendar) {
-            Dialog(onDismissRequest = {}) {
-                Card(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("正在创建动态日历", style = MaterialTheme.typography.titleMedium)
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
+            RetroDialog(onDismissRequest = {}) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("正在创建动态日历", style = MaterialTheme.typography.titleMedium)
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
         }
 
         calendarToDelete?.let { calendar ->
-            AlertDialog(
-                onDismissRequest = { calendarToDelete = null },
-                title = { Text("删除动态日历") },
-                text = { Text("将删除这组 1 至 31 日图标及其动态日历映射。") },
-                confirmButton = {
-                    Button(onClick = {
-                        viewModel.deleteMapping(calendar)
-                        calendarToDelete = null
-                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") }
-                },
-                dismissButton = { TextButton(onClick = { calendarToDelete = null }) { Text("取消") } }
-            )
-        }
-
-        if (showDefaultClockConfirmation) {
-            AlertDialog(
-                onDismissRequest = { showDefaultClockConfirmation = false },
-                title = { Text("添加动态时钟") },
-                text = { Text("将创建缺省表盘与指针图层，并按 CandyBar 默认时钟应用规则导出。") },
-                confirmButton = {
-                    Button(onClick = {
-                        showDefaultClockConfirmation = false
-                        isCreatingDefaultClock = true
-                        scope.launch {
-                            val layers = withContext(Dispatchers.IO) {
-                                DynamicIconAssets.createDefaultClockLayers(context, projectId)
-                            }
-                            isCreatingDefaultClock = false
-                            if (layers == null) {
-                                Toast.makeText(context, "无法创建缺省动态时钟图标", Toast.LENGTH_LONG).show()
-                            } else {
-                                viewModel.insertMapping(
-                                    IconMapping(
-                                        projectId = projectId,
-                                        iconName = "动态时钟",
-                                        targetPackageName = DynamicIconDefaults.DEFAULT_CLOCK_MAPPING_PACKAGE,
-                                        targetActivityName = "",
-                                        iconPath = layers.backgroundPath,
-                                        mappingType = 2,
-                                        extraInfo = DynamicIconAssets.clockExtraInfo(layers)
-                                    )
-                                )
-                            }
-                        }
-                    }) { Text("确认添加") }
-                },
-                dismissButton = { TextButton(onClick = { showDefaultClockConfirmation = false }) { Text("取消") } }
-            )
-        }
-
-        if (isCreatingDefaultClock) {
-            Dialog(onDismissRequest = {}) {
-                Card(
-                    shape = MaterialTheme.shapes.medium,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("正在创建动态时钟", style = MaterialTheme.typography.titleMedium)
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            RetroDialog(
+                onDismissRequest = { calendarToDelete = null }
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("删除动态日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("将删除这组 1 至 31 日图标及其动态日历映射。")
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        RetroOutlinedButton(onClick = { calendarToDelete = null }) { Text("取消") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroButton(
+                            onClick = {
+                                viewModel.deleteMapping(calendar)
+                                calendarToDelete = null
+                            },
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ) { Text("删除") }
                     }
                 }
             }
         }
 
+        if (showDefaultClockConfirmation) {
+            RetroDialog(
+                onDismissRequest = { showDefaultClockConfirmation = false }
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("添加动态时钟", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("将创建缺省表盘与指针图层，并按 CandyBar 默认时钟应用规则导出。")
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        RetroOutlinedButton(onClick = { showDefaultClockConfirmation = false }) { Text("取消") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroButton(onClick = {
+                            showDefaultClockConfirmation = false
+                            isCreatingDefaultClock = true
+                            scope.launch {
+                                val layers = withContext(Dispatchers.IO) {
+                                    DynamicIconAssets.createDefaultClockLayers(context, projectId)
+                                }
+                                isCreatingDefaultClock = false
+                                if (layers == null) {
+                                    Toast.makeText(context, localize("无法创建缺省动态时钟图标", currentLanguage), Toast.LENGTH_LONG).show()
+                                } else {
+                                    viewModel.insertMapping(
+                                        IconMapping(
+                                            projectId = projectId,
+                                            iconName = "动态时钟",
+                                            targetPackageName = DynamicIconDefaults.DEFAULT_CLOCK_MAPPING_PACKAGE,
+                                            targetActivityName = "",
+                                            iconPath = layers.backgroundPath,
+                                            mappingType = 2,
+                                            extraInfo = DynamicIconAssets.clockExtraInfo(layers)
+                                        )
+                                    )
+                                }
+                            }
+                        }) { Text("确认添加") }
+                    }
+                }
+            }
+        }
+
+        if (isCreatingDefaultClock) {
+            RetroDialog(onDismissRequest = {}) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("正在创建动态时钟", style = MaterialTheme.typography.titleMedium)
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
+
         clockToDelete?.let { clock ->
-            AlertDialog(
-                onDismissRequest = { clockToDelete = null },
-                title = { Text("删除动态时钟") },
-                text = { Text("将删除表盘、指针图层及其动态时钟映射。") },
-                confirmButton = {
-                    Button(onClick = {
-                        viewModel.deleteMapping(clock)
-                        clockToDelete = null
-                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") }
-                },
-                dismissButton = { TextButton(onClick = { clockToDelete = null }) { Text("取消") } }
-            )
+            RetroDialog(
+                onDismissRequest = { clockToDelete = null }
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("删除动态时钟", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("将删除表盘、指针图层及其动态时钟映射。")
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        RetroOutlinedButton(onClick = { clockToDelete = null }) { Text("取消") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroButton(
+                            onClick = {
+                                viewModel.deleteMapping(clock)
+                                clockToDelete = null
+                            },
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ) { Text("删除") }
+                    }
+                }
+            }
         }
 
         if (showCalendarEditor) {
@@ -702,14 +747,14 @@ fun ProjectEditorScreen(
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         })
                     } catch (e: Exception) {
-                        Toast.makeText(context, "无法打开系统安装器", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, localize("无法打开系统安装器", currentLanguage), Toast.LENGTH_SHORT).show()
                     }
                 },
                 onOpenLocation = {
                     try {
                         context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
                     } catch (e: Exception) {
-                        Toast.makeText(context, "无法打开下载目录", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, localize("无法打开下载目录", currentLanguage), Toast.LENGTH_SHORT).show()
                     }
                 },
                 onDismiss = { completedApk = null }
@@ -720,24 +765,18 @@ fun ProjectEditorScreen(
 
 @Composable
 private fun ExportProgressDialog(progress: ApkGenerator.Progress) {
-    Dialog(onDismissRequest = {}) {
-        Card(
-            shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    RetroDialog(onDismissRequest = {}) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text("正在构建 APK", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(progress.message, style = MaterialTheme.typography.bodyMedium)
-                LinearProgressIndicator(
-                    progress = { (progress.step.coerceIn(0, 5)) / 5f },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text("步骤 ${progress.step.coerceAtLeast(1)} / 5", style = MaterialTheme.typography.labelMedium)
-            }
+            Text("正在构建 APK", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(progress.message, style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(
+                progress = { (progress.step.coerceIn(0, 5)) / 5f },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text("步骤 ${progress.step.coerceAtLeast(1)} / 5", style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -749,41 +788,70 @@ private fun ExportCompleteDialog(
     onOpenLocation: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("导出完成") },
-        text = { Text("$fileName 已保存到下载目录") },
-        confirmButton = {
-            Button(onClick = onInstall) {
-                Icon(Icons.Default.InstallMobile, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("安装")
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onOpenLocation) { Text("打开位置") }
-                TextButton(onClick = onDismiss) { Text("关闭") }
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("导出完成", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("$fileName 已保存到下载目录")
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RetroOutlinedButton(onClick = onOpenLocation) { Text("打开位置") }
+                Spacer(modifier = Modifier.width(8.dp))
+                RetroOutlinedButton(onClick = onDismiss) { Text("关闭") }
+                Spacer(modifier = Modifier.width(8.dp))
+                RetroButton(onClick = onInstall) {
+                    Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("安装")
+                }
             }
         }
-    )
+    }
 }
 
 @Composable
 fun ChangeIconDialog(onDismiss: () -> Unit, onFromFile: () -> Unit, onFromGallery: () -> Unit, onViaGenerator: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("更换图标") },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("更换图标", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ListItem(headlineContent = { Text("从相册选择") }, leadingContent = { Icon(Icons.Default.Photo, null) }, modifier = Modifier.clickable { onFromGallery() })
-                ListItem(headlineContent = { Text("从文件选择") }, leadingContent = { Icon(Icons.Default.FileOpen, null) }, modifier = Modifier.clickable { onFromFile() })
-                ListItem(headlineContent = { Text("快速生成") }, leadingContent = { Icon(Icons.Default.AutoFixHigh, null) }, modifier = Modifier.clickable { onViaGenerator() })
+                Surface(
+                    onClick = onFromGallery,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    ListItem(headlineContent = { Text("从相册选择") }, leadingContent = { Icon(Icons.Default.Photo, null) })
+                }
+                Surface(
+                    onClick = onFromFile,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    ListItem(headlineContent = { Text("从文件选择") }, leadingContent = { Icon(Icons.Default.FileOpen, null) })
+                }
+                Surface(
+                    onClick = onViaGenerator,
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    ListItem(headlineContent = { Text("快速生成") }, leadingContent = { Icon(Icons.Default.AutoFixHigh, null) })
+                }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onDismiss) { Text("取消") } }
-    )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -806,9 +874,12 @@ private fun AddIconDialog(
         packageName.trim(),
         activityName.trim().ifBlank { defaultActivityName(packageName) }
     )
-    AlertDialog(
-        onDismissRequest = onDismiss, title = { Text("添加图标") },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("添加图标", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(
                     iconName,
@@ -832,19 +903,23 @@ private fun AddIconDialog(
                     placeholder = { Text(defaultActivityName(packageName)) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                RetroOutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Apps, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("从已安装应用填入包名")
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton({ onAddFromGallery(input) }, Modifier.weight(1f), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("图库") }
-                    OutlinedButton({ onAddFromFile(input) }, Modifier.weight(1f), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("文件") }
+                    RetroOutlinedButton({ onAddFromGallery(input) }, Modifier.weight(1f), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("图库") }
+                    RetroOutlinedButton({ onAddFromFile(input) }, Modifier.weight(1f), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("文件") }
                 }
-                Button({ onAddViaGenerator(input) }, Modifier.fillMaxWidth(), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("快速生成") }
+                RetroButton({ onAddViaGenerator(input) }, Modifier.fillMaxWidth(), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("快速生成") }
             }
-        }, confirmButton = {}, dismissButton = { TextButton(onDismiss) { Text("取消") } }
-    )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onDismiss) { Text("取消") }
+            }
+        }
+    }
 
     if (showAppPicker) {
         AppPicker(
@@ -876,8 +951,12 @@ fun DuplicateMappingDialog(mapping: IconMapping, existingMappings: List<IconMapp
         val t = if (isManual) inputPkg else selectedApp?.packageName ?: ""
         hasPackageConflict(t, 0, existingMappings)
     }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("复制") },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("复制", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(isManual, { isManual = true }); Text("手动填写", Modifier.clickable { isManual = true })
@@ -895,18 +974,42 @@ fun DuplicateMappingDialog(mapping: IconMapping, existingMappings: List<IconMapp
                         placeholder = { Text(defaultActivityName(inputPkg)) },
                         modifier = Modifier.fillMaxWidth()
                     )
-                }
-                else LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                    items(uncoveredApps) { app ->
-                        ListItem(headlineContent = { Text(app.name) }, supportingContent = { Text(app.packageName) },
-                            leadingContent = { Image(app.icon.toBitmap().asImageBitmap(), null, Modifier.size(32.dp)) },
-                            trailingContent = { RadioButton(selectedApp == app, { selectedApp = app }) },
-                            modifier = Modifier.clickable { selectedApp = app })
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                        items(uncoveredApps) { app ->
+                            Surface(
+                                onClick = { selectedApp = app },
+                                shape = MaterialTheme.shapes.medium,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                ListItem(
+                                    headlineContent = { Text(app.name) },
+                                    supportingContent = { Text(app.packageName) },
+                                    leadingContent = { Image(app.icon.toBitmap().asImageBitmap(), null, Modifier.size(32.dp)) },
+                                    trailingContent = { RadioButton(selectedApp == app, { selectedApp = app }) }
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }, confirmButton = { Button({ onConfirm(if (isManual) inputPkg else selectedApp!!.packageName, if (isManual) inputActivity.ifBlank { defaultActivityName(inputPkg) } else selectedApp!!.activityName) }, enabled = !isDup && (if(isManual) inputPkg.isNotBlank() else selectedApp != null)) { Text("确认") } }
-    )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
+                Spacer(modifier = Modifier.width(8.dp))
+                RetroButton(
+                    onClick = {
+                        onConfirm(
+                            if (isManual) inputPkg else selectedApp!!.packageName,
+                            if (isManual) inputActivity.ifBlank { defaultActivityName(inputPkg) } else selectedApp!!.activityName
+                        )
+                    },
+                    enabled = !isDup && (if (isManual) inputPkg.isNotBlank() else selectedApp != null)
+                ) { Text("确认") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -917,8 +1020,12 @@ fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMa
     val isDup = remember(pkg, existingMappings) {
         pkg != mapping.targetPackageName && hasPackageConflict(pkg, mapping.mappingType, existingMappings, mapping.id)
     }
-    AlertDialog(onDismiss, title = { Text(title) },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(iconName, { iconName = it }, label = { Text("图标名称") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(pkg, { pkg = it }, label = { Text("包名") }, isError = isDup, modifier = Modifier.fillMaxWidth())
@@ -930,9 +1037,17 @@ fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMa
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-        },
-        confirmButton = { Button({ onConfirm(mapping.copy(iconName = iconName.trim(), targetPackageName = pkg.trim(), targetActivityName = activity.trim().ifBlank { defaultActivityName(pkg) })) }, enabled = pkg.isNotBlank() && !isDup) { Text("确认") } }
-    )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
+                Spacer(modifier = Modifier.width(8.dp))
+                RetroButton(
+                    onClick = { onConfirm(mapping.copy(iconName = iconName.trim(), targetPackageName = pkg.trim(), targetActivityName = activity.trim().ifBlank { defaultActivityName(pkg) })) },
+                    enabled = pkg.isNotBlank() && !isDup
+                ) { Text("确认") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -943,30 +1058,44 @@ private fun DynamicTypePickerDialog(
     onCalendar: () -> Unit,
     onClock: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("添加动态图标") },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("添加动态图标", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (showCalendar) {
-                    ListItem(
-                        headlineContent = { Text("动态日历") },
-                        leadingContent = { Icon(Icons.Default.CalendarMonth, null) },
-                        modifier = Modifier.clickable(onClick = onCalendar)
-                    )
+                    Surface(
+                        onClick = onCalendar,
+                        shape = MaterialTheme.shapes.medium,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        ListItem(
+                            headlineContent = { Text("动态日历") },
+                            leadingContent = { Icon(Icons.Default.CalendarMonth, null) }
+                        )
+                    }
                 }
                 if (showClock) {
-                    ListItem(
-                        headlineContent = { Text("动态时钟") },
-                        leadingContent = { Icon(Icons.Default.AccessTime, null) },
-                        modifier = Modifier.clickable(onClick = onClock)
-                    )
+                    Surface(
+                        onClick = onClock,
+                        shape = MaterialTheme.shapes.medium,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        ListItem(
+                            headlineContent = { Text("动态时钟") },
+                            leadingContent = { Icon(Icons.Default.AccessTime, null) }
+                        )
+                    }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1008,10 +1137,12 @@ private fun CalendarDynamicEditorDialog(
     }
     val canConfirm = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate && !isGeneratingFrames && frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (mapping == null) "添加动态日历" else "编辑动态日历") },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text(if (mapping == null) "添加动态日历" else "编辑动态日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1032,14 +1163,14 @@ private fun CalendarDynamicEditorDialog(
                     placeholder = { Text(defaultActivityName(packageName)) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                RetroOutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Apps, null)
                     Spacer(Modifier.width(8.dp))
                     Text("从已安装应用填入包名")
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { imageLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("图库") }
-                    OutlinedButton(onClick = { imageLauncher.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("文件") }
+                    RetroOutlinedButton(onClick = { imageLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("图库") }
+                    RetroOutlinedButton(onClick = { imageLauncher.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("文件") }
                 }
                 when {
                     isGeneratingFrames -> {
@@ -1050,38 +1181,40 @@ private fun CalendarDynamicEditorDialog(
                         Text(frameGenerationError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                     frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(model = File(frames.first()), contentDescription = null, modifier = Modifier.size(52.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
-                        Spacer(Modifier.width(12.dp))
-                        Text("已生成 ${frames.size} 个日期图标", style = MaterialTheme.typography.bodySmall)
-                    }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(model = File(frames.first()), contentDescription = null, modifier = Modifier.size(52.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                            Spacer(Modifier.width(12.dp))
+                            Text("已生成 ${frames.size} 个日期图标", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                     else -> {
                         Text("请选择图片以生成日期图标", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val base = mapping ?: IconMapping(projectId = projectId, targetPackageName = packageName.trim(), targetActivityName = "", iconPath = frames.first())
-                    onConfirm(
-                        base.copy(
-                            iconName = iconName.trim(),
-                            targetPackageName = packageName.trim(),
-                            targetActivityName = activityName.trim().ifBlank { defaultActivityName(packageName) },
-                            iconPath = frames.first(),
-                            mappingType = 1,
-                            extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
+                Spacer(modifier = Modifier.width(8.dp))
+                RetroButton(
+                    onClick = {
+                        val base = mapping ?: IconMapping(projectId = projectId, targetPackageName = packageName.trim(), targetActivityName = "", iconPath = frames.first())
+                        onConfirm(
+                            base.copy(
+                                iconName = iconName.trim(),
+                                targetPackageName = packageName.trim(),
+                                targetActivityName = activityName.trim().ifBlank { defaultActivityName(packageName) },
+                                iconPath = frames.first(),
+                                mappingType = 1,
+                                extraInfo = DynamicIconAssets.calendarExtraInfo(frames)
+                            )
                         )
-                    )
-                },
-                enabled = canConfirm
-            ) { Text("确认") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
+                    },
+                    enabled = canConfirm
+                ) { Text("确认") }
+            }
+        }
+    }
 
     if (showAppPicker) {
         AppPicker(
@@ -1137,10 +1270,12 @@ private fun ClockDynamicEditorDialog(
     }
     val canConfirm = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate && backgroundPath.isNotBlank() && hourPath.isNotBlank() && minutePath.isNotBlank()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (mapping == null) "添加动态时钟" else "编辑动态时钟") },
-        text = {
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text(if (mapping == null) "添加动态时钟" else "编辑动态时钟", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1161,7 +1296,7 @@ private fun ClockDynamicEditorDialog(
                     placeholder = { Text(defaultActivityName(packageName)) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                RetroOutlinedButton(onClick = { showAppPicker = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Apps, null)
                     Spacer(Modifier.width(8.dp))
                     Text("从已安装应用填入包名")
@@ -1171,28 +1306,30 @@ private fun ClockDynamicEditorDialog(
                 ClockLayerSelector("分针", minutePath, { requestedLayer = "minute"; imageLauncher.launch("image/*") }, { requestedLayer = "minute"; imageLauncher.launch("*/*") })
                 ClockLayerSelector("秒针", secondPath, { requestedLayer = "second"; imageLauncher.launch("image/*") }, { requestedLayer = "second"; imageLauncher.launch("*/*") })
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val layers = DynamicIconAssets.ClockLayers(backgroundPath, hourPath, minutePath, secondPath.ifBlank { minutePath })
-                    val base = mapping ?: IconMapping(projectId = projectId, targetPackageName = packageName.trim(), targetActivityName = "", iconPath = backgroundPath)
-                    onConfirm(
-                        base.copy(
-                            iconName = iconName.trim(),
-                            targetPackageName = packageName.trim(),
-                            targetActivityName = activityName.trim().ifBlank { defaultActivityName(packageName) },
-                            iconPath = backgroundPath,
-                            mappingType = 2,
-                            extraInfo = DynamicIconAssets.clockExtraInfo(layers)
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
+                Spacer(modifier = Modifier.width(8.dp))
+                RetroButton(
+                    onClick = {
+                        val layers = DynamicIconAssets.ClockLayers(backgroundPath, hourPath, minutePath, secondPath.ifBlank { minutePath })
+                        val base = mapping ?: IconMapping(projectId = projectId, targetPackageName = packageName.trim(), targetActivityName = "", iconPath = backgroundPath)
+                        onConfirm(
+                            base.copy(
+                                iconName = iconName.trim(),
+                                targetPackageName = packageName.trim(),
+                                targetActivityName = activityName.trim().ifBlank { defaultActivityName(packageName) },
+                                iconPath = backgroundPath,
+                                mappingType = 2,
+                                extraInfo = DynamicIconAssets.clockExtraInfo(layers)
+                            )
                         )
-                    )
-                },
-                enabled = canConfirm
-            ) { Text("确认") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
+                    },
+                    enabled = canConfirm
+                ) { Text("确认") }
+            }
+        }
+    }
 
     if (showAppPicker) {
         AppPicker(
@@ -1208,13 +1345,23 @@ private fun ClockDynamicEditorDialog(
 
 @Composable
 private fun ClockLayerSelector(label: String, path: String, onGallery: () -> Unit, onFile: () -> Unit) {
-    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (path.isNotBlank()) {
-                AsyncImage(model = File(path), contentDescription = null, modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    AsyncImage(model = File(path), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
             } else {
                 Icon(Icons.Default.Image, null, Modifier.size(40.dp), MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1374,7 +1521,7 @@ private fun CalendarFrameItem(
         )
         Spacer(Modifier.height(4.dp))
         Text("$day 日", style = MaterialTheme.typography.labelSmall)
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        RetroDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             DropdownMenuItem(text = { Text("从图库更换") }, onClick = { showMenu = false; onAction(CalendarFrameAction.Gallery) })
             DropdownMenuItem(text = { Text("从文件更换") }, onClick = { showMenu = false; onAction(CalendarFrameAction.File) })
             DropdownMenuItem(text = { Text("恢复缺省图标") }, onClick = { showMenu = false; onAction(CalendarFrameAction.Reset) })
@@ -1454,7 +1601,7 @@ private fun ClockLayerItem(
         )
         Spacer(Modifier.height(4.dp))
         Text(layer.displayName, style = MaterialTheme.typography.labelSmall)
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        RetroDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             DropdownMenuItem(text = { Text("从图库更换") }, onClick = { showMenu = false; onAction(ClockLayerAction.Gallery) })
             DropdownMenuItem(text = { Text("从文件更换") }, onClick = { showMenu = false; onAction(ClockLayerAction.File) })
             DropdownMenuItem(text = { Text("恢复缺省图层") }, onClick = { showMenu = false; onAction(ClockLayerAction.Reset) })
@@ -1565,7 +1712,7 @@ fun MappingItemView(mapping: IconMapping, onEdit: (IconMapping) -> Unit, onChang
     Column(Modifier.aspectRatio(0.7f).clickable { showMenu = true }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         AsyncImage(model = File(mapping.iconPath), null, Modifier.size(44.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
         Text(mapping.displayName(), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        DropdownMenu(showMenu, { showMenu = false }) {
+        RetroDropdownMenu(showMenu, { showMenu = false }) {
             DropdownMenuItem(text = { Text("编辑信息") }, onClick = { showMenu = false; onEdit(mapping) })
             if (mapping.mappingType == 0 || !enableDynamicActions) {
                 DropdownMenuItem(text = { Text("更换图标") }, onClick = { showMenu = false; onChangeIcon(mapping) })
@@ -1616,13 +1763,13 @@ fun FabMenu(onAdd: () -> Unit, onSearch: () -> Unit, onStats: () -> Unit, showAd
     var ex by remember { mutableStateOf(false) }
     Column(horizontalAlignment = Alignment.End) {
         if (ex) {
-            SmallFloatingActionButton({ ex = false; onStats() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.PieChart, null) }
-            SmallFloatingActionButton({ ex = false; onSearch() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Search, null) }
+            RetroSmallFAB({ ex = false; onStats() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.PieChart, null) }
+            RetroSmallFAB({ ex = false; onSearch() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Search, null) }
             if (showAdd) {
-                SmallFloatingActionButton({ ex = false; onAdd() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Add, null) }
+                RetroSmallFAB({ ex = false; onAdd() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Add, null) }
             }
         }
-        FloatingActionButton({ ex = !ex }) { Icon(if (ex) Icons.Default.Close else Icons.Default.Menu, null) }
+        RetroFAB({ ex = !ex }) { Icon(if (ex) Icons.Default.Close else Icons.Default.Menu, null) }
     }
 }
 
@@ -1637,12 +1784,30 @@ fun StatsDialog(mappings: List<IconMapping>, onDismiss: () -> Unit) {
         val pkgs = mappings.map { it.targetPackageName }.toSet()
         coveredCount = apps.count { it.packageName in pkgs }
     }
-    AlertDialog(onDismiss, title = { Text("统计信息") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatRow("图标总数", mappings.size.toString()); StatRow("已安装应用", installedCount.toString()); StatRow("已覆盖", coveredCount.toString()); StatRow("未覆盖", (installedCount - coveredCount).toString())
-            LinearProgressIndicator(progress = { if (installedCount > 0) coveredCount.toFloat() / installedCount else 0f }, modifier = Modifier.fillMaxWidth())
+    RetroDialog(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("统计信息", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatRow("图标总数", mappings.size.toString())
+                StatRow("已安装应用", installedCount.toString())
+                StatRow("已覆盖", coveredCount.toString())
+                StatRow("未覆盖", (installedCount - coveredCount).toString())
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { if (installedCount > 0) coveredCount.toFloat() / installedCount else 0f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                RetroButton(onClick = onDismiss) { Text("关闭") }
+            }
         }
-    }, confirmButton = { Button(onClick = onDismiss) { Text("关闭") } })
+    }
 }
 
 @Composable
@@ -1652,7 +1817,7 @@ fun StatRow(l: String, v: String) { Row(Modifier.fillMaxWidth(), Arrangement.Spa
 fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Unit) {
     if (project == null) return
     val context = LocalContext.current
-    
+    var showBackMenu by remember { mutableStateOf(false) }
     var currentPickingType by remember { mutableStateOf<String?>(null) }
     val stylePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
@@ -1691,8 +1856,14 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
                 onUpdate(project.copy(iconBackPaths = if(remaining.isEmpty()) null else remaining.joinToString(",")))
             })
         }
-        OutlinedButton(onClick = { currentPickingType = "back"; stylePickerLauncher.launch("image/*") }, Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("添加背景")
+        Box(modifier = Modifier.fillMaxWidth()) {
+            RetroOutlinedButton(onClick = { showBackMenu = true }, Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("添加背景")
+            }
+            RetroDropdownMenu(expanded = showBackMenu, onDismissRequest = { showBackMenu = false }) {
+                DropdownMenuItem(text = { Text("从图库选择") }, onClick = { showBackMenu = false; currentPickingType = "back"; stylePickerLauncher.launch("image/*") })
+                DropdownMenuItem(text = { Text("从文件选择") }, onClick = { showBackMenu = false; currentPickingType = "back"; stylePickerLauncher.launch("*/*") })
+            }
         }
     }
 }

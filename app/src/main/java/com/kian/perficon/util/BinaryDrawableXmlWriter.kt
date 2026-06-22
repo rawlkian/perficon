@@ -19,7 +19,8 @@ object BinaryDrawableXmlWriter {
 
     fun build(mappings: List<IconMapping>, slotIndices: List<Int>): ByteArray = build(
         staticMappings = mappings,
-        staticSlotIndices = slotIndices
+        staticSlotIndices = slotIndices,
+        language = com.kian.perficon.ui.AppLanguage.System
     )
 
     fun build(
@@ -28,20 +29,25 @@ object BinaryDrawableXmlWriter {
         calendarMappings: List<IconMapping> = emptyList(),
         calendarSlotIndices: List<Int> = emptyList(),
         clockMappings: List<IconMapping> = emptyList(),
-        clockSlotIndices: List<Int> = emptyList()
+        clockSlotIndices: List<Int> = emptyList(),
+        language: com.kian.perficon.ui.AppLanguage = com.kian.perficon.ui.AppLanguage.System
     ): ByteArray {
         require(staticMappings.size == staticSlotIndices.size) { "Static mappings and template slots must match." }
         require(calendarMappings.size == calendarSlotIndices.size) { "Calendar mappings and template slots must match." }
         require(clockMappings.size == clockSlotIndices.size) { "Clock mappings and template slots must match." }
 
+        val allIconsName = com.kian.perficon.ui.localize("全部图标", language)
+        val dynamicCalendarName = com.kian.perficon.ui.localize("动态日历", language)
+        val dynamicClockName = com.kian.perficon.ui.localize("动态时钟", language)
+
         val categories = buildList {
-            add(Category("全部图标", staticMappings.zip(staticSlotIndices).map { (mapping, slot) -> Entry(mapping, "icon_$slot") }))
-            add(Category("动态日历", calendarMappings.zip(calendarSlotIndices).map { (mapping, slot) -> Entry(mapping, "calendar_${slot}_1") }))
-            add(Category("动态时钟", clockMappings.zip(clockSlotIndices).map { (mapping, slot) -> Entry(mapping, "clock_dynamic_$slot") }))
+            add(Category(allIconsName, staticMappings.zip(staticSlotIndices).map { (mapping, slot) -> Entry(mapping, "icon_$slot") }))
+            add(Category(dynamicCalendarName, calendarMappings.zip(calendarSlotIndices).map { (mapping, slot) -> Entry(mapping, "calendar_${slot}_1") }))
+            add(Category(dynamicClockName, clockMappings.zip(clockSlotIndices).map { (mapping, slot) -> Entry(mapping, "clock_dynamic_$slot") }))
         }.filter { it.entries.isNotEmpty() }
 
         val strings = linkedSetOf(
-            "resources", "version", "category", "item", "title", "drawable", "name", "1", "全部图标", "动态日历", "动态时钟"
+            "resources", "version", "category", "item", "title", "drawable", "name", "1", allIconsName, dynamicCalendarName, dynamicClockName
         )
         categories.forEach { category ->
             category.entries.forEach { entry ->

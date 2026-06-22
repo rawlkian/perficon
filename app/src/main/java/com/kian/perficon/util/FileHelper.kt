@@ -10,6 +10,28 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import android.graphics.Bitmap
+
+fun saveBitmapToInternalStorage(context: Context, bitmap: Bitmap, fileName: String, projectId: Long = -1): String? {
+    return try {
+        val directory = if (projectId == -1L) {
+            File(StorageHelper.rootDir, "Temp")
+        } else {
+            StorageHelper.getProjectIconsDir(projectId)
+        }
+        
+        if (!directory.exists()) directory.mkdirs()
+        
+        val file = File(directory, fileName)
+        val outputStream = FileOutputStream(file)
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+        outputStream.close()
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
 
 /**
  * Saves an icon to the project-specific icons directory in the public Perficon folder.

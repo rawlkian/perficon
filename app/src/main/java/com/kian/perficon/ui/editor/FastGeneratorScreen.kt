@@ -78,8 +78,10 @@ import coil.compose.AsyncImage
 import com.kian.perficon.model.IconPackProject
 import com.kian.perficon.ui.AppPicker
 import com.kian.perficon.ui.Text
+import com.kian.perficon.ui.components.*
 import com.kian.perficon.util.StorageHelper
 import com.kian.perficon.util.saveIconToInternalStorage
+import androidx.compose.foundation.BorderStroke
 import java.io.File
 import java.io.FileOutputStream
 
@@ -189,7 +191,7 @@ fun FastGeneratorScreen(
                     }
                 },
                 actions = {
-                    TextButton(
+                    RetroButton(
                         onClick = {
                             val generated = generateFinalIcon(
                                 source = sourceBitmap,
@@ -217,7 +219,8 @@ fun FastGeneratorScreen(
 
                             generated.recycle()
                             onSave(outputFile.absolutePath)
-                        }
+                        },
+                        modifier = Modifier.padding(end = 8.dp)
                     ) {
                         Text(
                             text = "保存",
@@ -378,7 +381,7 @@ fun FastGeneratorScreen(
                             Icon(
                                 imageVector =
                                     Icons.Default.SettingsBackupRestore,
-                                contentDescription = "Restore default变换"
+                                contentDescription = "恢复默认变换"
                             )
                         }
                     }
@@ -427,7 +430,7 @@ fun FastGeneratorScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Button(
+                    RetroButton(
                         onClick = {
                             imageLauncher.launch("image/*")
                         },
@@ -441,7 +444,7 @@ fun FastGeneratorScreen(
                         Text("相册")
                     }
 
-                    OutlinedButton(
+                    RetroOutlinedButton(
                         onClick = {
                             showAppPicker = true
                         },
@@ -510,7 +513,7 @@ fun FastGeneratorScreen(
                             Icon(
                                 imageVector =
                                     Icons.Default.SettingsBackupRestore,
-                                contentDescription = "Restore default背景"
+                                contentDescription = "恢复默认背景"
                             )
                         }
                     }
@@ -528,8 +531,9 @@ fun FastGeneratorScreen(
                             color = if (backPath != null) {
                                 MaterialTheme.colorScheme.primaryContainer
                             } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            }
+                                MaterialTheme.colorScheme.surface
+                            },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -561,8 +565,9 @@ fun FastGeneratorScreen(
                             color = if (backgroundColor != null) {
                                 MaterialTheme.colorScheme.primaryContainer
                             } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            }
+                                MaterialTheme.colorScheme.surface
+                            },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -613,61 +618,57 @@ fun FastGeneratorScreen(
             showIconTypeChoice &&
             appIconToProcess != null
         ) {
-            AlertDialog(
+            RetroDialog(
                 onDismissRequest = {
                     showIconTypeChoice = false
                     appIconToProcess = null
-                },
-                title = {
-                    Text("图标素材Select")
-                },
-                text = {
+                }
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text("选择图标来源", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        "两种模式只决定 Source Image 如何提取；" +
-                                "之后都会统一经过 Background、模板 Mask 和 Overlay。"
+                        "两种模式只决定 Source Image 如何提取；之后都会统一经过 Background、模板 Mask 和 Overlay。"
                     )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val drawable =
-                                requireNotNull(appIconToProcess)
-
-                            replaceSourceBitmap(
-                                drawableToOriginalBitmap(
-                                    drawable = drawable,
-                                    size = 512
-                                )
-                            )
-
-                            showIconTypeChoice = false
-                            appIconToProcess = null
-                        }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
                     ) {
-                        Text("原始图层")
-                    }
-                },
-                dismissButton = {
-                    OutlinedButton(
-                        onClick = {
-                            val drawable =
-                                requireNotNull(appIconToProcess)
-
-                            replaceSourceBitmap(
-                                drawableToStandardBitmap(
-                                    drawable = drawable,
-                                    size = 512
+                        RetroOutlinedButton(
+                            onClick = {
+                                val drawable = requireNotNull(appIconToProcess)
+                                replaceSourceBitmap(
+                                    drawableToStandardBitmap(
+                                        drawable = drawable,
+                                        size = 512
+                                    )
                                 )
-                            )
-
-                            showIconTypeChoice = false
-                            appIconToProcess = null
+                                showIconTypeChoice = false
+                                appIconToProcess = null
+                            }
+                        ) {
+                            Text("标准图标")
                         }
-                    ) {
-                        Text("标准图标")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroButton(
+                            onClick = {
+                                val drawable = requireNotNull(appIconToProcess)
+                                replaceSourceBitmap(
+                                    drawableToOriginalBitmap(
+                                        drawable = drawable,
+                                        size = 512
+                                    )
+                                )
+                                showIconTypeChoice = false
+                                appIconToProcess = null
+                            }
+                        ) {
+                            Text("原始图层")
+                        }
                     }
                 }
-            )
+            }
         }
 
         if (showColorPicker) {
@@ -709,14 +710,18 @@ fun AssetRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (path != null) {
-                AsyncImage(
-                    model = File(path),
-                    contentDescription = "$label preview",
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(MaterialTheme.shapes.small),
-                    contentScale = ContentScale.Crop
-                )
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    AsyncImage(
+                        model = File(path),
+                        contentDescription = "$label preview",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
 
             IconButton(
@@ -729,8 +734,9 @@ fun AssetRow(
                 )
             }
 
-            TextButton(
-                onClick = onPick
+            RetroOutlinedButton(
+                onClick = onPick,
+                modifier = Modifier.padding(start = 8.dp)
             ) {
                 Text(
                     text = if (path == null) {
@@ -762,53 +768,50 @@ fun ColorPickerDialog(
         Color.Gray
     )
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text("背景颜色")
-        },
-        text = {
-            Column {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    commonColors.forEach { color ->
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(color, CircleShape)
-                                .clickable {
-                                    onColorSelected(color)
-                                }
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(24.dp))
-
-                OutlinedButton(
-                    onClick = onEyedropper,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Colorize,
-                        contentDescription = null
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text("背景颜色", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                commonColors.forEach { color ->
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(color, CircleShape)
+                            .clickable {
+                                onColorSelected(color)
+                            }
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("使用取色器")
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onDismiss
+
+            Spacer(Modifier.height(24.dp))
+
+            RetroOutlinedButton(
+                onClick = onEyedropper,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("取消")
+                Icon(
+                    imageVector = Icons.Default.Colorize,
+                    contentDescription = null
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("使用取色器")
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) {
+                    Text("取消")
+                }
             }
         }
-    )
+    }
 }
 
 /**

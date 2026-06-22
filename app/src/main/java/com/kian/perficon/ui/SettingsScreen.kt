@@ -16,7 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material3.AlertDialog
+import com.kian.perficon.ui.components.RetroDialog
+import com.kian.perficon.ui.components.RetroOutlinedButton
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -87,10 +88,12 @@ fun SettingsScreen(
     }
 
     if (showLanguagePicker) {
-        AlertDialog(
-            onDismissRequest = { showLanguagePicker = false },
-            title = { Text("应用语言") },
-            text = {
+        RetroDialog(
+            onDismissRequest = { showLanguagePicker = false }
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text("应用语言", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     AppLanguage.entries.forEach { option ->
                         Row(
@@ -114,9 +117,14 @@ fun SettingsScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {}
-        )
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    RetroOutlinedButton(onClick = { showLanguagePicker = false }) {
+                        Text("关闭")
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 package com.kian.perficon.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,10 +17,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import com.kian.perficon.ui.components.RetroDialog
+import com.kian.perficon.ui.components.RetroOutlinedButton
 import com.kian.perficon.util.AppInfo
 import com.kian.perficon.util.getInstalledApps
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppPicker(
     onDismiss: () -> Unit,
@@ -38,66 +40,71 @@ fun AppPicker(
                 it.packageName.contains(searchQuery, ignoreCase = true)
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择应用", style = MaterialTheme.typography.headlineSmall) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    label = { Text("Search应用...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                LazyColumn(
-                    modifier = Modifier.height(400.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(filteredApps) { app ->
-                        Surface(
-                            onClick = { onAppSelected(app) },
-                            shape = MaterialTheme.shapes.medium,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    RetroDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Text("选择应用", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = { Text("搜索应用...") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            LazyColumn(
+                modifier = Modifier.height(340.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredApps) { app ->
+                    Surface(
+                        onClick = { onAppSelected(app) },
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
+                            Image(
+                                bitmap = app.icon.toBitmap().asImageBitmap(),
+                                contentDescription = null,
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Image(
-                                    bitmap = app.icon.toBitmap().asImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(MaterialTheme.shapes.small)
+                                    .size(48.dp)
+                                    .clip(MaterialTheme.shapes.small)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    text = app.name, 
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column {
-                                    Text(
-                                        text = app.name, 
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = app.packageName, 
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                    )
-                                }
+                                Text(
+                                    text = app.packageName, 
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                RetroOutlinedButton(onClick = onDismiss) {
+                    Text("关闭")
+                }
             }
-        },
-        shape = MaterialTheme.shapes.extraLarge
-    )
+        }
+    }
 }

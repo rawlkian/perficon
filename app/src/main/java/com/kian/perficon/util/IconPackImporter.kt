@@ -71,6 +71,7 @@ class IconPackImporter(
         sourcePackageName: String,
         newProjectName: String,
         newPackageName: String,
+        projectIconPath: String? = null,
         progressFlow: MutableStateFlow<ImportProgress>
     ): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -109,6 +110,25 @@ class IconPackImporter(
 
             // Create project first to get ID
             val projectId = repository.insertProject(IconPackProject(name = newProjectName, packageName = newPackageName))
+            var finalIconPath: String? = projectIconPath
+            if (projectIconPath != null) {
+                val tempFile = File(projectIconPath)
+                if (tempFile.exists()) {
+                    val projectIconsDir = StorageHelper.getProjectIconsDir(projectId)
+                    if (!projectIconsDir.exists()) projectIconsDir.mkdirs()
+                    val destFile = File(projectIconsDir, tempFile.name)
+                    try {
+                        tempFile.copyTo(destFile, overwrite = true)
+                        finalIconPath = destFile.absolutePath
+                        tempFile.delete()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+            if (finalIconPath != null) {
+                repository.updateProject(repository.getProjectById(projectId)!!.copy(projectIconPath = finalIconPath))
+            }
             val projectIconsDir = StorageHelper.getProjectIconsDir(projectId)
             var currentProject = repository.getProjectById(projectId) ?: return@withContext false
 
