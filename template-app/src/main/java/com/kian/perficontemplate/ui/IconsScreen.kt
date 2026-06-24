@@ -4,11 +4,14 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +23,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,14 +43,19 @@ private fun dynamicStringResource(name: String, default: String): String {
     }
 }
 
+data class IconMappingInfo(
+    val label: String,
+    val packageName: String
+)
+
 data class UnifiedIcon(
     val id: String,
     val drawableName: String,
     val iconName: String,
-    val packageName: String,
     val isDynamic: Boolean,
     val dynamicType: String? = null, // "calendar" or "clock"
-    val resId: Int
+    val resId: Int,
+    val mappings: List<IconMappingInfo>
 )
 
 @Composable
@@ -58,60 +67,73 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
 
     // Cache bitmaps by resId to save memory and avoid re-decoding
     val bitmapCache = remember { mutableStateMapOf<Int, ImageBitmap?>() }
+    
+    var selectedIconForDetail by remember { mutableStateOf<UnifiedIcon?>(null) }
 
     val unifiedList = remember(icons, dynamics) {
         val list = mutableListOf<UnifiedIcon>()
-        var idCounter = 0
-        icons.forEach {
+        
+        // Group static icons by drawableResId to deduplicate
+        val staticGroups = icons.groupBy { it.drawableResId }
+        staticGroups.forEach { (resId, entries) ->
+            val firstEntry = entries.first()
             list += UnifiedIcon(
-                id = "static_${idCounter++}",
-                drawableName = it.drawableName,
-                iconName = it.iconName,
-                packageName = it.packageName,
+                id = "static_${resId}",
+                drawableName = firstEntry.drawableName,
+                iconName = firstEntry.iconName,
                 isDynamic = false,
-                resId = it.drawableResId
+                resId = resId,
+                mappings = entries.map { IconMappingInfo(it.iconName, it.packageName) }
             )
         }
-        dynamics.forEach { entry ->
-            if (entry.type == DynamicType.CALENDAR) {
-                val previewName = "${entry.drawablePrefix}1"
-                val resId = context.resources.getIdentifier(previewName, "drawable", context.packageName)
-                if (resId != 0) {
-                    list += UnifiedIcon(
-                        id = "calendar_${idCounter++}",
-                        drawableName = entry.drawablePrefix,
-                        iconName = entry.iconName,
-                        packageName = entry.packageName,
-                        isDynamic = true,
-                        dynamicType = "calendar",
-                        resId = resId
-                    )
-                }
-            } else if (entry.type == DynamicType.CLOCK) {
-                val slotNum = entry.drawableName.removePrefix("clock_dynamic_")
-                val bgResName = "clock_${slotNum}_bg"
-                val resId = context.resources.getIdentifier(bgResName, "drawable", context.packageName)
-                if (resId != 0) {
-                    list += UnifiedIcon(
-                        id = "clock_${idCounter++}",
-                        drawableName = entry.drawableName,
-                        iconName = entry.iconName,
-                        packageName = entry.packageName,
-                        isDynamic = true,
-                        dynamicType = "clock",
-                        resId = resId
-                    )
-                }
+        
+        // Group calendar dynamics by prefix
+        val calendarGroups = dynamics.filter { it.type == DynamicType.CALENDAR }.groupBy { it.drawablePrefix }
+        calendarGroups.forEach { (prefix, entries) ->
+            val firstEntry = entries.first()
+            val previewName = "${prefix}1"
+            val resId = context.resources.getIdentifier(previewName, "drawable", context.packageName)
+            if (resId != 0) {
+                list += UnifiedIcon(
+                    id = "calendar_${prefix}",
+                    drawableName = prefix,
+                    iconName = firstEntry.iconName,
+                    isDynamic = true,
+                    dynamicType = "calendar",
+                    resId = resId,
+                    mappings = entries.map { IconMappingInfo(it.iconName, it.packageName) }
+                )
             }
         }
+        
+        // Group clock dynamics by drawableName
+        val clockGroups = dynamics.filter { it.type == DynamicType.CLOCK }.groupBy { it.drawableName }
+        clockGroups.forEach { (drawableName, entries) ->
+            val firstEntry = entries.first()
+            val slotNum = drawableName.removePrefix("clock_dynamic_")
+            val bgResName = "clock_${slotNum}_bg"
+            val resId = context.resources.getIdentifier(bgResName, "drawable", context.packageName)
+            if (resId != 0) {
+                list += UnifiedIcon(
+                    id = "clock_${drawableName}",
+                    drawableName = drawableName,
+                    iconName = firstEntry.iconName,
+                    isDynamic = true,
+                    dynamicType = "clock",
+                    resId = resId,
+                    mappings = entries.map { IconMappingInfo(it.iconName, it.packageName) }
+                )
+            }
+        }
+        
         list.sortedBy { it.iconName }
     }
 
     val filtered = remember(unifiedList, query) {
         if (query.isBlank()) unifiedList
-        else unifiedList.filter {
-            it.iconName.contains(query, ignoreCase = true) ||
-                    it.packageName.contains(query, ignoreCase = true)
+        else unifiedList.filter { icon ->
+            icon.iconName.contains(query, ignoreCase = true) ||
+            icon.mappings.any { it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true) }
         }
     }
 
@@ -125,7 +147,7 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text(dynamicStringResource("search_hint", "搜索图标..."), style = MaterialTheme.typography.bodyMedium) },
+                placeholder = { Text(dynamicStringResource("search_hint", "搜索图标或应用包名..."), style = MaterialTheme.typography.bodyMedium) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
                         IconButton(onClick = { query = ""; focusManager.clearFocus() }) {
@@ -186,22 +208,73 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
                                 context.resources.getDrawable(entry.resId, null)
                                     .toBitmap(96, 96).asImageBitmap()
                             }.getOrNull()
-                        }
+                        },
+                        onClick = { selectedIconForDetail = entry }
                     )
                 }
             }
         }
     }
+
+    // Detail Dialog
+    if (selectedIconForDetail != null) {
+        val icon = selectedIconForDetail!!
+        AlertDialog(
+            onDismissRequest = { selectedIconForDetail = null },
+            confirmButton = {
+                TextButton(onClick = { selectedIconForDetail = null }) {
+                    Text(dynamicStringResource("dialog_ok", "确定"))
+                }
+            },
+            title = {
+                Text(
+                    text = icon.iconName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = dynamicStringResource("dialog_mappings_title", "关联应用包名："),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    icon.mappings.forEach { mapping ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text(
+                                text = mapping.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = mapping.packageName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
 }
 
 @Composable
-private fun IconCell(entry: UnifiedIcon, bitmap: ImageBitmap?) {
+private fun IconCell(entry: UnifiedIcon, bitmap: ImageBitmap?, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.small)
+            .clickable { onClick() }
             .padding(6.dp)
     ) {
         Box(contentAlignment = Alignment.TopEnd) {

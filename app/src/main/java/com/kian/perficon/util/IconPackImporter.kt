@@ -37,6 +37,13 @@ class IconPackImporter(
     private val TAG = "IconPackImporter"
     private val drawableLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
 
+    private data class ParsedMapping(
+        val component: String?,
+        val drawable: String,
+        val tagName: String,
+        val displayName: String?
+    )
+
     data class ImportProgress(
         val totalItems: Int = 0,
         val currentItem: Int = 0,
@@ -91,7 +98,7 @@ class IconPackImporter(
             val remoteRes = remoteContext.resources
             val mappingFiles = listOf("appfilter.xml", "drawable.xml", "theme_resources.xml", "appmap.xml")
 
-            val allIconsMap = mutableMapOf<String, Triple<String?, String, String>>()
+            val allIconsMap = mutableMapOf<String, ParsedMapping>()
             val clockMappings = mutableListOf<Triple<String, String, JSONObject>>()
             val dynamicClockDrawables = mutableSetOf<String>()
             val globalConfig = GlobalOverlayConfig()
@@ -153,8 +160,8 @@ class IconPackImporter(
             )
 
             val calendarComponents = allIconsMap.values
-                .filter { it.third.equals("calendar", true) || it.third.equals("calender", true) }
-                .mapNotNull { it.first }
+                .filter { it.tagName.equals("calendar", true) || it.tagName.equals("calender", true) }
+                .mapNotNull { it.component }
                 .toSet()
 
             val mappingsToInsert = java.util.Collections.synchronizedList(mutableListOf<IconMapping>())
@@ -162,13 +169,14 @@ class IconPackImporter(
             val semaphore = Semaphore(16)
 
             coroutineScope {
-                allIconsMap.values.map { triple ->
+                allIconsMap.values.map { mappingItem ->
                     async(Dispatchers.IO) {
                         semaphore.withPermit {
                             coroutineContext.ensureActive()
-                            val component = triple.first
-                            val drawableName = triple.second
-                            val tagName = triple.third
+                            val component = mappingItem.component
+                            val drawableName = mappingItem.drawable
+                            val tagName = mappingItem.tagName
+                            val displayName = mappingItem.displayName
 
                             val isCalendar = tagName.equals("calendar", true) || tagName.equals("calender", true)
                             if (!isCalendar && component != null && component in calendarComponents) {
@@ -180,6 +188,9 @@ class IconPackImporter(
                             }
 
                             val (targetPkg, targetActivity) = parseComponentInfo(component)
+                            val finalIconName = displayName?.takeIf { it.isNotBlank() }
+                                ?: targetPkg.substringAfterLast(".")
+
                             if (isCalendar) {
                                 val frames = (1..DynamicIconAssets.CALENDAR_DAY_COUNT).mapNotNull { day ->
                                     extractDrawableToPrivateStorage(
@@ -193,7 +204,7 @@ class IconPackImporter(
                                 if (frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT) {
                                     mappingsToInsert.add(IconMapping(
                                         projectId = projectId,
-                                        iconName = targetPkg.substringAfterLast("."),
+                                        iconName = finalIconName,
                                         targetPackageName = targetPkg,
                                         targetActivityName = targetActivity,
                                         iconPath = frames.first(),
@@ -206,7 +217,7 @@ class IconPackImporter(
                                 if (layers != null) {
                                     mappingsToInsert.add(IconMapping(
                                         projectId = projectId,
-                                        iconName = targetPkg.substringAfterLast("."),
+                                        iconName = finalIconName,
                                         targetPackageName = targetPkg,
                                         targetActivityName = targetActivity,
                                         iconPath = layers.backgroundPath,
@@ -219,7 +230,7 @@ class IconPackImporter(
                                 if (iconPath != null) {
                                     mappingsToInsert.add(IconMapping(
                                         projectId = projectId,
-                                        iconName = targetPkg.substringAfterLast("."),
+                                        iconName = finalIconName,
                                         targetPackageName = targetPkg,
                                         targetActivityName = targetActivity,
                                         iconPath = iconPath
@@ -333,7 +344,7 @@ class IconPackImporter(
 
     private fun parseXmlToMap(
         parser: XmlPullParser,
-        map: MutableMap<String, Triple<String?, String, String>>,
+        map: MutableMap<String, ParsedMapping>,
         clocks: MutableList<Triple<String, String, JSONObject>>,
         dynamicClockDrawables: MutableSet<String>,
         config: GlobalOverlayConfig
@@ -346,7 +357,10 @@ class IconPackImporter(
                         "item", "calendar", "calender" -> {
                             val comp = getSafeAttribute(parser, "component")
                             val draw = getSafeAttribute(parser, "drawable") ?: getSafeAttribute(parser, "prefix")
-                            if (draw != null) map["${comp ?: ""}_$draw"] = Triple(comp, draw, parser.name)
+                            val name = getSafeAttribute(parser, "name")
+                            if (draw != null) {
+                                map["${comp ?: ""}_$draw"] = ParsedMapping(comp, draw, parser.name, name)
+                            }
                         }
                         "dynamic-clock" -> {
                             val pkg = getSafeAttribute(parser, "package")

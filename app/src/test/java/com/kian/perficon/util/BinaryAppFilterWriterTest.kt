@@ -30,6 +30,86 @@ class BinaryAppFilterWriterTest {
     }
 
     @Test
+    fun testInspectDbFile() {
+        val oneFile = File("d:/AndroidProject/Perficon/One.apk")
+        val threeFile = File("d:/AndroidProject/Perficon/Three.apk")
+        if (!oneFile.exists() || !threeFile.exists()) {
+            println("APK files missing!")
+            return
+        }
+
+        java.util.zip.ZipFile(oneFile).use { one ->
+            java.util.zip.ZipFile(threeFile).use { three ->
+                val oneEntries = one.entries().asSequence().map { it.name }.toSet()
+                val threeEntries = three.entries().asSequence().map { it.name }.toSet()
+
+                println("=== ENTRY COUNT ===")
+                println("One.apk entries: ${oneEntries.size}")
+                println("Three.apk entries: ${threeEntries.size}")
+
+                println("\n=== non-icon Entries in One but not in Three ===")
+                (oneEntries - threeEntries).filter { !it.contains("icon_") && !it.startsWith("META-INF") }.forEach {
+                    println("  $it")
+                }
+
+                println("\n=== non-icon Entries in Three but not in One ===")
+                (threeEntries - oneEntries).filter { !it.contains("icon_") && !it.startsWith("META-INF") }.forEach {
+                    println("  $it")
+                }
+
+                println("user.dir: ${System.getProperty("user.dir")}")
+                val baseFile = listOf(
+                    File("app/src/main/assets/base.apk"),
+                    File("src/main/assets/base.apk"),
+                    File("../app/src/main/assets/base.apk")
+                ).firstOrNull { it.exists() }
+                if (baseFile != null) {
+                    java.util.zip.ZipFile(baseFile).use { base ->
+                        val entry = base.getEntry("assets/appfilter.xml") ?: base.getEntry("res/xml/appfilter.xml")
+                        if (entry != null) {
+                            val baseText = base.getInputStream(entry).readBytes().decodeToString()
+                            println("base.apk appfilter (${entry.name}) lines for mt.plus:")
+                            if (entry.name.endsWith(".xml") && !entry.name.startsWith("assets")) {
+                                // Binary XML contains the string
+                                if (baseText.contains("bin.mt.plus")) {
+                                    println("  [Found 'bin.mt.plus' in binary XML string pool]")
+                                } else {
+                                    println("  [NOT Found 'bin.mt.plus' in binary XML string pool]")
+                                }
+                            } else {
+                                baseText.lineSequence().filter { it.contains("bin.mt.plus") }.forEach { println("  $it") }
+                            }
+                        } else {
+                            println("base.apk appfilter entry NOT FOUND")
+                        }
+                    }
+                } else {
+                    println("base.apk NOT FOUND")
+                }
+
+                val oneText = one.getInputStream(one.getEntry("assets/appfilter.xml")).readBytes().decodeToString()
+                val threeText = three.getInputStream(three.getEntry("assets/appfilter.xml")).readBytes().decodeToString()
+
+                println("One.apk appfilter lines for mt.plus:")
+                oneText.lineSequence().filter { it.contains("bin.mt.plus") }.forEach { println("  $it") }
+                println("Three.apk appfilter lines for mt.plus:")
+                threeText.lineSequence().filter { it.contains("bin.mt.plus") }.forEach { println("  $it") }
+
+                // Inspect drawable.xml mapping as well
+                println("\n=== DRAWABLE.XML MAPPING FOR MT MANAGER ===")
+                val oneDrawableXml = one.getInputStream(one.getEntry("assets/drawable.xml") ?: one.getEntry("res/xml/drawable.xml")).readBytes().decodeToString()
+                val threeDrawableXml = three.getInputStream(three.getEntry("assets/drawable.xml") ?: three.getEntry("res/xml/drawable.xml")).readBytes().decodeToString()
+                
+                println("One.apk drawable.xml lines for icon_2682:")
+                oneDrawableXml.lineSequence().filter { it.contains("icon_2682") }.forEach { println("  $it") }
+                println("Three.apk drawable.xml lines for icon_2287:")
+                threeDrawableXml.lineSequence().filter { it.contains("icon_2287") }.forEach { println("  $it") }
+            }
+        }
+    }
+
+
+    @Test
     fun writesCalendarPrefixesAndClockLayerMetadata() {
         val calendar = IconMapping(
             projectId = 1,
@@ -61,3 +141,12 @@ class BinaryAppFilterWriterTest {
         assertTrue(content.contains("hourLayerIndex"))
     }
 }
+
+
+
+
+
+
+
+
+

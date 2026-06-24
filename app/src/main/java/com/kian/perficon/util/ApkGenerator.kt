@@ -1,6 +1,8 @@
 package com.kian.perficon.util
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import com.kian.perficon.model.IconMapping
 import com.kian.perficon.model.IconPackProject
 import java.io.File
@@ -17,8 +19,8 @@ class ApkGenerator(private val context: Context) {
         // Bundled template slot capacities — derived from the actual template APK resources.
         // These are only used for pre-build validation; actual capacity is always
         // detected at build time via findTemplateSlots / findCalendarTemplateSlots / findClockTemplateSlots.
-        const val DYNAMIC_CALENDAR_SLOT_COUNT = 8
-        const val DYNAMIC_CLOCK_SLOT_COUNT = 8
+        const val DYNAMIC_CALENDAR_SLOT_COUNT = 64
+        const val DYNAMIC_CLOCK_SLOT_COUNT = 64
     }
 
     class GenerationException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -85,9 +87,6 @@ class ApkGenerator(private val context: Context) {
                             (mapping.mappingType == 1 && !project.useDynamicCalendar) ||
                             (mapping.mappingType == 2 && !project.useDynamicClock))
                 }
-                .groupBy { it.targetPackageName }
-                .values
-                .map { alternatives -> alternatives.firstOrNull { it.mappingType == 0 } ?: alternatives.first() }
 
             // ── Resource deduplication ──────────────────────────────────────
             // Group calendar mappings by their artwork fingerprint so that
@@ -107,7 +106,7 @@ class ApkGenerator(private val context: Context) {
 
             // Older projects only stored a package name. Resolve its real launcher Activity
             // at export time so component-based launchers such as Lawnchair can match it.
-            val resolvedMappings = staticMappings.map(::resolveLaunchActivity)
+            val resolvedMappings = expandMappingsWithLauncherActivities(staticMappings).map(::resolveLaunchActivity)
 
             // Build per-mapping slot index assignments with deduplication.
             // Each unique artwork group gets one slot; all mappings in the group share it.
@@ -141,9 +140,14 @@ class ApkGenerator(private val context: Context) {
                     val slots = slotsResult.staticSlots
                     val calendarSlots = slotsResult.calendarSlots
                     val clockSlots = slotsResult.clockSlots
-                    if (resolvedMappings.size > slots.size) {
+
+                    // Group static mappings by their iconPath to deduplicate slot usage.
+                    // This allows multiple launcher activity mappings (like MT Manager)
+                    // to exist concurrently in appfilter.xml pointing to the same slot drawable.
+                    val uniqueIconPaths = resolvedMappings.map { it.iconPath }.distinct()
+                    if (uniqueIconPaths.size > slots.size) {
                         throw GenerationException(
-                            "图标包模板最多支持 ${slots.size} 个静态图标，当前项目有 ${resolvedMappings.size} 个静态图标映射，请减少图标数量或使用支持更多槽位的模板。"
+                            "图标包模板最多支持 ${slots.size} 个静态图标，当前项目有 ${uniqueIconPaths.size} 个独特静态图标，请减少图标数量或使用支持更多槽位的模板。"
                         )
                     }
                     if (uniqueCalendarCount > calendarSlots.size) {
@@ -152,6 +156,9 @@ class ApkGenerator(private val context: Context) {
                     if (uniqueClockCount > clockSlots.size) {
                         throw GenerationException("模板只包含 ${clockSlots.size} 组完整的动态时钟资源。")
                     }
+
+                    // Map unique iconPath to template slots
+                    val iconPathToSlot = uniqueIconPaths.zip(slots).toMap()
 
                     // Map our sequential slot counter (1-based) to actual template slot indices
                     val calendarSlotMap = calendarSlots.take(uniqueCalendarCount)
@@ -162,9 +169,11 @@ class ApkGenerator(private val context: Context) {
                     val resolvedCalendarSlotIndices = calendarSlotAssignments.map { calendarSlotMap.getValue(it) }
                     val resolvedClockSlotIndices = clockSlotAssignments.map { clockSlotMap.getValue(it) }
 
-                    val replacements = slots.zip(resolvedMappings).associate { (slot, mapping) ->
-                        slot.entryName to File(mapping.iconPath)
+                    // Only replace slots for unique icon files
+                    val replacements = iconPathToSlot.entries.associate { (iconPath, slot) ->
+                        slot.entryName to File(iconPath)
                     }
+
 
                     val expandedCalendarMappings = mutableListOf<IconMapping>()
                     val expandedCalendarSlotIndices = mutableListOf<Int>()
@@ -211,14 +220,62 @@ class ApkGenerator(private val context: Context) {
                         slotsResult.calendarDir,
                         slotsResult.clockDir
                     )
-                    val missingIcons = (replacements.values + dynamicReplacements.values).filterNot(File::isFile)
-                    if (missingIcons.isNotEmpty()) {
-                        throw GenerationException("One or more project icon files no longer exist.")
+                    val missingFiles = (replacements.values + dynamicReplacements.values).filterNot(File::isFile)
+                    if (missingFiles.isNotEmpty()) {
+                        val missingFilePaths = missingFiles.map { it.absolutePath }.toSet()
+                        val details = mutableListOf<String>()
+
+                        // Check static mappings
+                        resolvedMappings.forEach { mapping ->
+                            val f = File(mapping.iconPath)
+                            if (f.absolutePath in missingFilePaths) {
+                                details += "静态图标: ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
+                            }
+                        }
+
+                        // Check calendar mappings
+                        dedupCalendars.forEach { mapping ->
+                            val frames = DynamicIconAssets.calendarFrames(mapping)
+                            frames.forEachIndexed { idx, framePath ->
+                                val f = File(framePath)
+                                if (f.absolutePath in missingFilePaths) {
+                                    details += "动态日历 (第 ${idx + 1} 天): ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
+                                }
+                            }
+                        }
+
+                        // Check clock mappings
+                        dedupClocks.forEach { mapping ->
+                            val layers = DynamicIconAssets.clockLayers(mapping)
+                            val clockFiles = listOf(
+                                "背景" to layers.backgroundPath,
+                                "时针" to layers.hourPath,
+                                "分针" to layers.minutePath,
+                                "秒针" to layers.secondPath
+                            )
+                            clockFiles.forEach { (layerName, path) ->
+                                val f = File(path)
+                                if (f.absolutePath in missingFilePaths) {
+                                    details += "动态时钟 ($layerName): ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
+                                }
+                            }
+                        }
+
+                        // Fallback if not matched
+                        if (details.isEmpty()) {
+                            missingFiles.forEach { f ->
+                                details += "未知文件: ${f.absolutePath}"
+                            }
+                        }
+
+                        throw GenerationException("以下项目图标文件不存在：\n" + details.joinToString("\n"))
                     }
+
+                    val resolvedStaticSlotIndices = resolvedMappings.map { iconPathToSlot.getValue(it.iconPath).index }
 
                     val resourceAppFilter = BinaryAppFilterWriter.build(
                         staticMappings = resolvedMappings,
-                        staticSlotIndices = slots.take(resolvedMappings.size).map(TemplateSlot::index),
+                        staticSlotIndices = resolvedStaticSlotIndices,
                         calendarMappings = expandedCalendarMappings,
                         calendarSlotIndices = expandedCalendarSlotIndices,
                         clockMappings = expandedClockMappings,
@@ -226,9 +283,21 @@ class ApkGenerator(private val context: Context) {
                         scaleFactor = project.scaleFactor
                     )
                     val currentLang = com.kian.perficon.ui.AppSettings(context).language.value
+
+                    // For drawable.xml, we only want to list unique icon drawables (no duplicate items in launcher picker)
+                    val uniqueStaticMappings = mutableListOf<IconMapping>()
+                    val uniqueStaticSlotIndices = mutableListOf<Int>()
+                    val seenSlots = mutableSetOf<Int>()
+                    resolvedMappings.zip(resolvedStaticSlotIndices).forEach { (mapping, slotIndex) ->
+                        if (seenSlots.add(slotIndex)) {
+                            uniqueStaticMappings += mapping
+                            uniqueStaticSlotIndices += slotIndex
+                        }
+                    }
+
                     val resourceDrawables = BinaryDrawableXmlWriter.build(
-                        staticMappings = resolvedMappings,
-                        staticSlotIndices = slots.take(resolvedMappings.size).map(TemplateSlot::index),
+                        staticMappings = uniqueStaticMappings,
+                        staticSlotIndices = uniqueStaticSlotIndices,
                         calendarMappings = dedupCalendars,
                         calendarSlotIndices = dedupCalendarSlots,
                         clockMappings = dedupClocks,
@@ -261,6 +330,12 @@ class ApkGenerator(private val context: Context) {
                     val projectIcon = project.projectIconPath
                         ?.let(::File)
                         ?.takeIf(File::isFile)
+                    val activeClockSlots = resolvedClockSlotIndices.toSet()
+                    val staticSlotPattern = Regex("^res/drawable[^/]*/icon_(\\d+)\\.png$")
+                    val calendarPattern = Regex("^(.*/)calendar_(\\d+)_(\\d+)\\.png$")
+                    val clockPattern = Regex("^(.*/)clock_(\\d+)_(bg|hour|minute|second)\\.png$")
+                    val clockXmlPattern = Regex("^res/drawable[^/]*/clock_dynamic_(\\d+)\\.xml$")
+
                     zip.entries().asSequence().forEach { entry ->
                         if (
                             shouldDiscardSignature(entry.name) ||
@@ -269,6 +344,30 @@ class ApkGenerator(private val context: Context) {
                         ) {
                             return@forEach
                         }
+
+                        // Size Slimming: Discard unused static/calendar/clock drawables and XML files
+                        val isStaticSlot = staticSlotPattern.matches(entry.name)
+                        val isCalendarSlot = calendarPattern.matches(entry.name)
+                        val isClockSlot = clockPattern.matches(entry.name)
+
+                        if (isStaticSlot && entry.name !in replacements) {
+                            return@forEach
+                        }
+                        if (isCalendarSlot && entry.name !in dynamicReplacements) {
+                            return@forEach
+                        }
+                        if (isClockSlot && entry.name !in dynamicReplacements) {
+                            return@forEach
+                        }
+
+                        val clockXmlMatch = clockXmlPattern.matchEntire(entry.name)
+                        if (clockXmlMatch != null) {
+                            val slotIndex = clockXmlMatch.groupValues[1].toInt()
+                            if (slotIndex !in activeClockSlots) {
+                                return@forEach
+                            }
+                        }
+
                         val replacement = replacements[entry.name]
                             ?: dynamicReplacements[entry.name]
                             ?: projectIcon?.takeIf {
@@ -322,7 +421,7 @@ class ApkGenerator(private val context: Context) {
                         generateAppFilter(
                             project,
                             resolvedMappings,
-                            slots.take(resolvedMappings.size).map(TemplateSlot::index),
+                            resolvedStaticSlotIndices,
                             expandedCalendarMappings,
                             expandedCalendarSlotIndices,
                             expandedClockMappings,
@@ -451,6 +550,59 @@ class ApkGenerator(private val context: Context) {
             replacements["${clkPrefix}clock_${slotIndex}_second.png"] = File(layers.secondPath)
         }
         return replacements
+    }
+
+    private fun expandMappingsWithLauncherActivities(
+        mappings: List<IconMapping>
+    ): List<IconMapping> {
+        val pm = context.packageManager
+        val expanded = mutableListOf<IconMapping>()
+        val pkgGroups = mappings.groupBy { it.targetPackageName }
+        
+        for ((pkgName, pkgMappings) in pkgGroups) {
+            if (pkgName.isBlank()) {
+                expanded.addAll(pkgMappings)
+                continue
+            }
+            
+            val intent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setPackage(pkgName)
+            }
+            val resolveInfos = try {
+                pm.queryIntentActivities(intent, 0)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            
+            if (resolveInfos.isNotEmpty()) {
+                val uniqueActivities = resolveInfos.map { it.activityInfo.name }.distinct()
+                val addedActivities = mutableSetOf<String>()
+                
+                uniqueActivities.forEach { activityName ->
+                    val existing = pkgMappings.firstOrNull { it.targetActivityName == activityName }
+                    if (existing != null) {
+                        expanded.add(existing)
+                        addedActivities.add(activityName)
+                    } else {
+                        val baseMapping = pkgMappings.first()
+                        expanded.add(baseMapping.copy(targetActivityName = activityName))
+                    }
+                }
+                
+                pkgMappings.forEach { mapping ->
+                    if (mapping.targetActivityName !in addedActivities && 
+                        mapping.targetActivityName.isNotBlank() &&
+                        uniqueActivities.none { it == mapping.targetActivityName }
+                    ) {
+                        expanded.add(mapping)
+                    }
+                }
+            } else {
+                expanded.addAll(pkgMappings)
+            }
+        }
+        return expanded
     }
 
     private fun resolveLaunchActivity(mapping: IconMapping): IconMapping {
