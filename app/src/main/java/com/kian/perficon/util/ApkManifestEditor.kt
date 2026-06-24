@@ -29,6 +29,8 @@ object ApkManifestEditor {
         require(readU16(buffer, poolStart) == RES_STRING_POOL_TYPE) { "The template manifest has no string pool." }
         val pool = StringPool.read(manifest, poolStart)
         val strings = pool.strings.toMutableList()
+
+        val templatePackageName = readPackageName(manifest) ?: "com.kian.perficontemplate"
         val appNameIndex = strings.size.also { strings += appName }
 
         var packageNameUpdated = false
@@ -79,11 +81,13 @@ object ApkManifestEditor {
                         }
 
                         "authorities" -> if (rawValueIndex != NO_INDEX) {
-                            strings[rawValueIndex] = strings[rawValueIndex].replace("com.candybar.dev", packageName)
+                            strings[rawValueIndex] = strings[rawValueIndex].replace(templatePackageName, packageName)
                         }
 
-                        "name" -> if (rawValueIndex != NO_INDEX && strings[rawValueIndex].startsWith("com.candybar.dev.DYNAMIC_")) {
-                            strings[rawValueIndex] = strings[rawValueIndex].replace("com.candybar.dev", packageName)
+                        "name" -> if (rawValueIndex != NO_INDEX && strings[rawValueIndex].contains(templatePackageName)) {
+                            if (elementName == "permission" || elementName == "uses-permission" || elementName == "uses-permission-sdk-23") {
+                                strings[rawValueIndex] = strings[rawValueIndex].replace(templatePackageName, packageName)
+                            }
                         }
                     }
                 }
@@ -174,7 +178,7 @@ object ApkManifestEditor {
         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putInt(offset, value)
     }
 
-    private class StringPool(
+    internal class StringPool(
         val headerSize: Int,
         val chunkSize: Int,
         val flags: Int,

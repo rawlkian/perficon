@@ -14,6 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import java.io.File
 
 class IconPackViewModel(application: Application) : AndroidViewModel(application) {
@@ -36,11 +39,21 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
         emit(importer.getInstalledIconPacks())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun insertProject(name: String, packageName: String, projectIconPath: String? = null) = viewModelScope.launch {
-        repository.insertProject(IconPackProject(name = name, packageName = packageName, projectIconPath = projectIconPath))
+    private val preferences = application.getSharedPreferences("perficon_settings", android.content.Context.MODE_PRIVATE)
+
+    fun isFirstLaunch(): Boolean {
+        return preferences.getBoolean("first_launch", true)
     }
 
-    fun deleteProject(project: IconPackProject) = viewModelScope.launch {
+    fun setFirstLaunchCompleted() {
+        preferences.edit().putBoolean("first_launch", false).apply()
+    }
+
+    fun insertProject(name: String, packageName: String, projectIconPath: String? = null, description: String = "") = viewModelScope.launch {
+        repository.insertProject(IconPackProject(name = name, packageName = packageName, projectIconPath = projectIconPath, description = description))
+    }
+
+    fun deleteProject(project: IconPackProject) = viewModelScope.launch(Dispatchers.IO) {
         repository.deleteProject(project)
         // Cleanup files
         StorageHelper.getProjectDir(project.id).deleteRecursively()
@@ -99,15 +112,25 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
             projectIconPath = newProjectIcon
         ))
 
-        // 4. Duplicate Mappings
+        // 4. Duplicate Mappings in parallel
         val oldMappings = repository.getMappingsForProject(project.id).first()
-        oldMappings.forEach { mapping ->
-            val oldFile = File(mapping.iconPath)
-            if (oldFile.exists()) {
-                val newFile = File(newIconsDir, "${mapping.targetPackageName}_${System.currentTimeMillis()}.png")
-                oldFile.copyTo(newFile)
-                repository.insertMapping(mapping.copy(id = 0, projectId = newProjectId, iconPath = newFile.absolutePath))
-            }
+        val newMappings = java.util.Collections.synchronizedList(mutableListOf<IconMapping>())
+        val counter = java.util.concurrent.atomic.AtomicLong(0)
+        
+        coroutineScope {
+            oldMappings.map { mapping ->
+                async(Dispatchers.IO) {
+                    val oldFile = File(mapping.iconPath)
+                    if (oldFile.exists()) {
+                        val newFile = File(newIconsDir, "${mapping.targetPackageName}_${counter.incrementAndGet()}.png")
+                        oldFile.copyTo(newFile, overwrite = true)
+                        newMappings.add(mapping.copy(id = 0, projectId = newProjectId, iconPath = newFile.absolutePath))
+                    }
+                }
+            }.awaitAll()
+        }
+        if (newMappings.isNotEmpty()) {
+            repository.insertMappings(newMappings)
         }
     }
 
@@ -157,9 +180,10 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
         name: String, 
         targetPkg: String,
         projectIconPath: String? = null,
+        description: String = "",
         progressFlow: MutableStateFlow<IconPackImporter.ImportProgress>
     ) = viewModelScope.launch {
-        val success = importer.importFromInstalledApp(sourcePkg, name, targetPkg, projectIconPath, progressFlow)
+        val success = importer.importFromInstalledApp(sourcePkg, name, targetPkg, projectIconPath, description, progressFlow)
         withContext(Dispatchers.Main) {
             if (!success) {
                 val currentLang = com.kian.perficon.ui.AppSettings(getApplication()).language.value

@@ -23,6 +23,7 @@ import com.kian.perficon.ui.AppSettings
 import com.kian.perficon.ui.LocalAppLanguage
 import com.kian.perficon.ui.ProjectEditorScreen
 import com.kian.perficon.ui.SettingsScreen
+import com.kian.perficon.ui.AboutScreen
 import com.kian.perficon.ui.editor.FastGeneratorScreen
 import com.kian.perficon.ui.theme.PerficonTheme
 import com.kian.perficon.viewmodel.IconPackViewModel
@@ -58,7 +59,13 @@ fun MainApp(appSettings: AppSettings) {
                 onNavigateToProject = { projectId ->
                     navController.navigate("editor/$projectId")
                 },
-                onNavigateToSettings = { navController.navigate("settings") }
+                onNavigateToSettings = { navController.navigate("settings") },
+                onNavigateToAbout = { navController.navigate("about") }
+            )
+        }
+        composable("about") {
+            AboutScreen(
+                onBack = { navController.popBackStack() }
             )
         }
         composable("settings") {

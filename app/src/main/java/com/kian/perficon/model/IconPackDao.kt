@@ -30,6 +30,9 @@ interface IconPackDao {
     @Insert
     suspend fun insertMapping(mapping: IconMapping)
 
+    @Insert
+    suspend fun insertMappings(mappings: List<IconMapping>)
+
     @Update
     suspend fun updateMapping(mapping: IconMapping)
 

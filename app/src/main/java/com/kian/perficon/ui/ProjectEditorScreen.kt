@@ -5,6 +5,7 @@ import android.app.DownloadManager
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -145,6 +146,7 @@ fun ProjectEditorScreen(
     var clockMappingToEdit by remember { mutableStateOf<IconMapping?>(null) }
     var exportProgress by remember { mutableStateOf<ApkGenerator.Progress?>(null) }
     var completedApk by remember { mutableStateOf<File?>(null) }
+    var buildError by remember { mutableStateOf<String?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val dynamicCalendarEnabled = project?.useDynamicCalendar == true
     val dynamicClockEnabled = project?.useDynamicClock == true
@@ -254,17 +256,22 @@ fun ProjectEditorScreen(
             val p = project ?: return@launch
             exportProgress = ApkGenerator.Progress(0, "正在启动构建")
             try {
-                val safeFileName = p.name.replace("[^a-zA-Z0-9]".toRegex(), "_") + ".apk"
+                val safeFileName = p.name.replace("[^\\p{L}\\p{N}]".toRegex(), "_") + ".apk"
                 val apkFile = withContext(Dispatchers.IO) {
-                    ApkGenerator(context).generateApk(p, mappings) { progress ->
+                    val generated = ApkGenerator(context).generateApk(p, mappings) { progress ->
                         mainHandler.post { exportProgress = progress }
-                    }.also { apk ->
-                        checkNotNull(exportFileToDownloads(context, apk, safeFileName))
                     }
+                    val exportedPath = exportFileToDownloads(context, generated, safeFileName)
+                        ?: throw IllegalStateException("无法将 APK 保存到下载目录。")
+                    generated
                 }
                 completedApk = apkFile
-            } catch (e: Exception) {
-                Toast.makeText(context, localize(e.message ?: "APK 构建失败。", currentLanguage), Toast.LENGTH_LONG).show()
+            } catch (e: Throwable) {
+                Log.e("ProjectEditor", "Failed to build APK", e)
+                val fullTrace = Log.getStackTraceString(e)
+                mainHandler.post {
+                    buildError = fullTrace
+                }
             } finally {
                 exportProgress = null
             }
@@ -411,17 +418,19 @@ fun ProjectEditorScreen(
                     initialName = currentProject.name,
                     initialPkg = currentProject.packageName,
                     initialIconPath = currentProject.projectIconPath,
+                    initialDescription = currentProject.description ?: "",
                     showDynamicOptions = true,
                     initialUseDynamicCalendar = currentProject.useDynamicCalendar,
                     initialUseDynamicClock = currentProject.useDynamicClock,
                     confirmLabel = "保存",
                     onDismiss = { showProjectEditDialog = false },
-                    onConfirm = { name, packageName, iconPath, useCalendar, useClock ->
+                    onConfirm = { name, packageName, iconPath, description, useCalendar, useClock ->
                         viewModel.updateProject(
                             currentProject.copy(
                                 name = name,
                                 packageName = packageName,
                                 projectIconPath = iconPath,
+                                description = description,
                                 useDynamicCalendar = useCalendar,
                                 useDynamicClock = useClock
                             )
@@ -629,7 +638,7 @@ fun ProjectEditorScreen(
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text("添加动态时钟", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("将创建缺省表盘与指针图层，并按 CandyBar 默认时钟应用规则导出。")
+                    Text("将创建缺省表盘与指针图层，并按图标包模板默认时钟应用规则导出。")
                     Spacer(modifier = Modifier.height(24.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -737,15 +746,23 @@ fun ProjectEditorScreen(
                 fileName = apkFile.name,
                 onInstall = {
                     try {
-                        val uri = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
-                            apkFile
-                        )
-                        context.startActivity(Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, "application/vnd.android.package-archive")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        })
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+                            Toast.makeText(context, localize("请授予 Perficon 安装应用的权限", currentLanguage), Toast.LENGTH_LONG).show()
+                            val intent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                data = android.net.Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } else {
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                apkFile
+                            )
+                            context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "application/vnd.android.package-archive")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            })
+                        }
                     } catch (e: Exception) {
                         Toast.makeText(context, localize("无法打开系统安装器", currentLanguage), Toast.LENGTH_SHORT).show()
                     }
@@ -759,6 +776,27 @@ fun ProjectEditorScreen(
                 },
                 onDismiss = { completedApk = null }
             )
+        }
+
+        buildError?.let { errorMsg ->
+            RetroDialog(
+                onDismissRequest = { buildError = null }
+            ) {
+                Column(modifier = Modifier.padding(24.dp).fillMaxWidth()) {
+                    Text("构建失败", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(modifier = Modifier.weight(1f, fill = false).heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                        Text(errorMsg, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        RetroButton(onClick = { buildError = null }) { Text("确定") }
+                    }
+                }
+            }
         }
     }
 }
@@ -796,19 +834,17 @@ private fun ExportCompleteDialog(
             Spacer(modifier = Modifier.height(12.dp))
             Text("$fileName 已保存到下载目录")
             Spacer(modifier = Modifier.height(24.dp))
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 RetroOutlinedButton(onClick = onOpenLocation) { Text("打开位置") }
-                Spacer(modifier = Modifier.width(8.dp))
                 RetroOutlinedButton(onClick = onDismiss) { Text("关闭") }
-                Spacer(modifier = Modifier.width(8.dp))
                 RetroButton(onClick = onInstall) {
                     Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("安装")
+                    Text("立即安装")
                 }
             }
         }
@@ -1363,7 +1399,7 @@ private fun ClockLayerSelector(label: String, path: String, onGallery: () -> Uni
                     AsyncImage(model = File(path), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 }
             } else {
-                Icon(Icons.Default.Image, null, Modifier.size(40.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.Image, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(10.dp))
             Text(label, modifier = Modifier.weight(1f))
@@ -1397,7 +1433,7 @@ private fun DynamicTabContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(Icons.Default.CalendarMonth, null, Modifier.size(72.dp), MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.CalendarMonth, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(16.dp))
             Text("还没有动态图标", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
@@ -1846,15 +1882,36 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
             Slider(value = project.scaleFactor, onValueChange = { onUpdate(project.copy(scaleFactor = it)) }, valueRange = 0.5f..1.5f)
         } }
         
-        IconSettingItem("蒙版", "应用于所有图标的裁切形状", project.iconMaskPath, { currentPickingType = "mask"; stylePickerLauncher.launch("image/*") }, { onUpdate(project.copy(iconMaskPath = null)) })
-        IconSettingItem("叠层", "显示在图标最上方的覆盖层", project.iconUponPath, { currentPickingType = "upon"; stylePickerLauncher.launch("image/*") }, { onUpdate(project.copy(iconUponPath = null)) })
+        IconSettingItem(
+            title = "蒙版",
+            desc = "应用于所有图标的裁切形状",
+            path = project.iconMaskPath,
+            onPickFromGallery = { currentPickingType = "mask"; stylePickerLauncher.launch("image/*") },
+            onPickFromFile = { currentPickingType = "mask"; stylePickerLauncher.launch("*/*") },
+            onRemove = { onUpdate(project.copy(iconMaskPath = null)) }
+        )
+        IconSettingItem(
+            title = "叠层",
+            desc = "显示在图标最上方的覆盖层",
+            path = project.iconUponPath,
+            onPickFromGallery = { currentPickingType = "upon"; stylePickerLauncher.launch("image/*") },
+            onPickFromFile = { currentPickingType = "upon"; stylePickerLauncher.launch("*/*") },
+            onRemove = { onUpdate(project.copy(iconUponPath = null)) }
+        )
         
         Text("背景", style = MaterialTheme.typography.titleMedium)
         project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.forEach { path ->
-            IconSettingItem("背景图片", "图标背景", path, {}, { 
-                val remaining = project.iconBackPaths.split(",").filter { it != path && it.isNotEmpty() }
-                onUpdate(project.copy(iconBackPaths = if(remaining.isEmpty()) null else remaining.joinToString(",")))
-            })
+            IconSettingItem(
+                title = "背景图片",
+                desc = "图标背景",
+                path = path,
+                onPickFromGallery = {},
+                onPickFromFile = {},
+                onRemove = { 
+                    val remaining = project.iconBackPaths.split(",").filter { it != path && it.isNotEmpty() }
+                    onUpdate(project.copy(iconBackPaths = if(remaining.isEmpty()) null else remaining.joinToString(",")))
+                }
+            )
         }
         Box(modifier = Modifier.fillMaxWidth()) {
             RetroOutlinedButton(onClick = { showBackMenu = true }, Modifier.fillMaxWidth()) {
@@ -1869,7 +1926,15 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
 }
 
 @Composable
-fun IconSettingItem(title: String, desc: String, path: String?, onPick: () -> Unit, onRemove: () -> Unit) {
+fun IconSettingItem(
+    title: String,
+    desc: String,
+    path: String?,
+    onPickFromGallery: () -> Unit,
+    onPickFromFile: () -> Unit,
+    onRemove: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1896,7 +1961,13 @@ fun IconSettingItem(title: String, desc: String, path: String?, onPick: () -> Un
                     }
                 }
             } else {
-                TextButton(onPick) { Text("选择") }
+                Box {
+                    TextButton(onClick = { showMenu = true }) { Text("选择") }
+                    RetroDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(text = { Text("从图库选择") }, onClick = { showMenu = false; onPickFromGallery() })
+                        DropdownMenuItem(text = { Text("从文件选择") }, onClick = { showMenu = false; onPickFromFile() })
+                    }
+                }
             }
         }
     }

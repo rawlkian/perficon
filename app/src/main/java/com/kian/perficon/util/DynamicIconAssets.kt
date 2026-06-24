@@ -83,18 +83,23 @@ object DynamicIconAssets {
         val outputFiles = (1..CALENDAR_DAY_COUNT).associateWith { day ->
             File(outputDir, "calendar_default_${token}_$day.png")
         }
+        // Find the first calendar slot that has all 31 days in the template.
+        // Template uses non-sequential slots (e.g. 10-16); we must detect which
+        // slot actually has complete resources rather than assuming slot 1.
+        val slot = detectFirstCompleteCalendarSlot(context) ?: return null.also { outputFiles.values.forEach(File::delete) }
         return try {
             context.assets.open("base.apk").use { asset ->
                 ZipInputStream(asset).use { zip ->
                     var entry = zip.nextEntry
                     while (entry != null) {
-                        val day = DEFAULT_CALENDAR_RESOURCE.matchEntire(entry.name.substringAfterLast('/'))
-                            ?.groupValues
-                            ?.getOrNull(1)
-                            ?.toIntOrNull()
-                        if (day != null && day in 1..CALENDAR_DAY_COUNT) {
-                            FileOutputStream(outputFiles.getValue(day)).use(zip::copyTo)
-                        }
+                        CALENDAR_BY_SLOT_RESOURCE.matchEntire(entry.name.substringAfterLast('/'))
+                            ?.let { match ->
+                                val s = match.groupValues[1].toIntOrNull()
+                                val day = match.groupValues[2].toIntOrNull()
+                                if (s == slot && day != null && day in 1..CALENDAR_DAY_COUNT) {
+                                    FileOutputStream(outputFiles.getValue(day)).use(zip::copyTo)
+                                }
+                            }
                         entry = zip.nextEntry
                     }
                 }
@@ -110,15 +115,40 @@ object DynamicIconAssets {
         }
     }
 
+    private fun detectFirstCompleteCalendarSlot(context: Context): Int? {
+        return try {
+            context.assets.open("base.apk").use { asset ->
+                ZipInputStream(asset).use { zip ->
+                    val slotDays = mutableMapOf<Int, MutableSet<Int>>()
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        DEFAULT_CALENDAR_RESOURCE.matchEntire(entry.name.substringAfterLast('/'))
+                            ?.let { match ->
+                                val slot = match.groupValues[1].toIntOrNull()
+                                val day = match.groupValues[2].toIntOrNull()
+                                if (slot != null && day != null && day in 1..CALENDAR_DAY_COUNT) {
+                                    slotDays.getOrPut(slot) { mutableSetOf() }.add(day)
+                                }
+                            }
+                        entry = zip.nextEntry
+                    }
+                    slotDays.entries.firstOrNull { it.value.size == CALENDAR_DAY_COUNT }?.key
+                }
+            }
+        } catch (_: Exception) { null }
+    }
+
     fun restoreDefaultCalendarFrame(context: Context, projectId: Long, day: Int): String? {
         require(day in 1..CALENDAR_DAY_COUNT)
         val output = File(StorageHelper.getProjectIconsDir(projectId), "calendar_default_${System.currentTimeMillis()}_$day.png")
+        // Detect the first calendar slot with complete 31-day resources in the template.
+        val slot = detectFirstCompleteCalendarSlot(context) ?: return null
         return try {
             context.assets.open("base.apk").use { asset ->
                 ZipInputStream(asset).use { zip ->
                     var entry = zip.nextEntry
                     while (entry != null) {
-                        if (entry.name.substringAfterLast('/') == "calendar_1_${day}.png") {
+                        if (entry.name.substringAfterLast('/') == "calendar_${slot}_${day}.png") {
                             FileOutputStream(output).use(zip::copyTo)
                             return output.absolutePath
                         }
@@ -246,5 +276,6 @@ object DynamicIconAssets {
         }
     }
 
-    private val DEFAULT_CALENDAR_RESOURCE = Regex("calendar_1_(\\d+)\\.png")
+    private val DEFAULT_CALENDAR_RESOURCE = Regex("calendar_(\\d+)_(\\d+)\\.png")
+    private val CALENDAR_BY_SLOT_RESOURCE = Regex("calendar_(\\d+)_(\\d+)\\.png")
 }

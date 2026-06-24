@@ -83,5 +83,5 @@ object DynamicIconDefaults {
             )
         }
 
-    private val COMPONENT_PATTERN = Regex("ComponentInfo\\{([^/]+)/([^}]+)}")
+    private val COMPONENT_PATTERN = Regex("ComponentInfo\\{([^/]+)/([^}]+)\\}")
 }

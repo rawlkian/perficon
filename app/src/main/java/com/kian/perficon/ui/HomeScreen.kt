@@ -40,7 +40,8 @@ import java.io.File
 fun HomeScreen(
     viewModel: IconPackViewModel,
     onNavigateToProject: (Long) -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToAbout: () -> Unit
 ) {
     val projects by viewModel.allProjects.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
@@ -49,12 +50,13 @@ fun HomeScreen(
     var pendingInstalledPack by remember { mutableStateOf<IconPackImporter.IconPackInfo?>(null) }
     var showBottomSheet by remember { mutableStateOf(false) }
     var projectToDelete by remember { mutableStateOf<IconPackProject?>(null) }
-    var isDeleting by remember { mutableStateOf(false) }
+    var showWelcomeDialog by remember { mutableStateOf(viewModel.isFirstLaunch()) }
     
     // Progress Dialog State
     var showProgressDialog by remember { mutableStateOf(false) }
     val progressFlow = remember { MutableStateFlow(IconPackImporter.ImportProgress()) }
     val currentProgress by progressFlow.collectAsState()
+    var importJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
@@ -87,11 +89,60 @@ fun HomeScreen(
         }
     }
 
+    if (showWelcomeDialog) {
+        RetroDialog(
+            onDismissRequest = {
+                viewModel.setFirstLaunchCompleted()
+                showWelcomeDialog = false
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                PixelWolfAnimation(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .padding(8.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "欢迎使用 Perficon ！",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "您可以选择完全从新创建图标包或者导入已安装的图标包！现在就开始你的图标包创作之旅吧！",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                RetroButton(
+                    onClick = {
+                        viewModel.setFirstLaunchCompleted()
+                        showWelcomeDialog = false
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("开始使用")
+                }
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Perficon", style = MaterialTheme.typography.titleLarge) },
                 actions = {
+                    IconButton(onClick = onNavigateToAbout) {
+                        Icon(Icons.Default.Info, contentDescription = "关于")
+                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -146,21 +197,51 @@ fun HomeScreen(
             ModalBottomSheet(
                 onDismissRequest = { showBottomSheet = false },
                 sheetState = sheetState,
-                shape = MaterialTheme.shapes.extraLarge,
-                containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
+                shape = MaterialTheme.shapes.medium,
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 0.dp,
+                dragHandle = {
+                    Surface(
+                        modifier = Modifier.padding(top = 12.dp).size(width = 36.dp, height = 4.dp),
+                        color = MaterialTheme.colorScheme.outline,
+                        shape = MaterialTheme.shapes.extraSmall
+                    ) {}
+                }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp, start = 16.dp, end = 16.dp, top = 8.dp)) {
                     Text("创建图标包", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
                     ListItem(
                         headlineContent = { Text("从零创建") },
                         supportingContent = { Text("从空白项目开始") },
-                        leadingContent = { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, null) } } },
+                        leadingContent = {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Add, null)
+                                }
+                            }
+                        },
                         modifier = Modifier.clickable { showBottomSheet = false; showAddDialog = true }
                     )
                     ListItem(
                         headlineContent = { Text("导入已安装图标包") },
                         supportingContent = { Text("从设备中选择图标包") },
-                        leadingContent = { Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.size(48.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Apps, null) } } },
+                        leadingContent = {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Apps, null)
+                                }
+                            }
+                        },
                         modifier = Modifier.clickable { showBottomSheet = false; showInstalledPacksDialog = true }
                     )
                 }
@@ -168,7 +249,13 @@ fun HomeScreen(
         }
 
         if (showAddDialog) {
-            AddProjectDialog(onDismiss = { showAddDialog = false }, onConfirm = { name, pkg, iconPath, _, _ -> viewModel.insertProject(name, pkg, iconPath); showAddDialog = false })
+            AddProjectDialog(
+                onDismiss = { showAddDialog = false },
+                onConfirm = { name, pkg, iconPath, description, _, _ ->
+                    viewModel.insertProject(name, pkg, iconPath, description)
+                    showAddDialog = false
+                }
+            )
         }
 
         if (showEditDialog != null) {
@@ -177,10 +264,11 @@ fun HomeScreen(
                 initialName = showEditDialog!!.name,
                 initialPkg = showEditDialog!!.packageName,
                 initialIconPath = showEditDialog!!.projectIconPath,
+                initialDescription = showEditDialog!!.description,
                 confirmLabel = "保存",
                 onDismiss = { showEditDialog = null },
-                onConfirm = { name, pkg, iconPath, _, _ ->
-                    viewModel.updateProject(showEditDialog!!.copy(name = name, packageName = pkg, projectIconPath = iconPath))
+                onConfirm = { name, pkg, iconPath, description, _, _ ->
+                    viewModel.updateProject(showEditDialog!!.copy(name = name, packageName = pkg, projectIconPath = iconPath, description = description))
                     showEditDialog = null
                 }
             )
@@ -206,11 +294,13 @@ fun HomeScreen(
                 initialIconPath = importedIconPath,
                 confirmLabel = "导入",
                 onDismiss = { pendingInstalledPack = null },
-                onConfirm = { name, pkg, iconPath, _, _ ->
+                onConfirm = { name, pkg, iconPath, description, _, _ ->
                     val pack = pendingInstalledPack ?: return@AddProjectDialog
                     pendingInstalledPack = null
                     showProgressDialog = true
-                    scope.launch { viewModel.importFromInstalledApp(pack.packageName, name, pkg, iconPath, progressFlow) }
+                    importJob = scope.launch {
+                        viewModel.importFromInstalledApp(pack.packageName, name, pkg, iconPath, description, progressFlow)
+                    }
                 }
             )
         }
@@ -220,7 +310,20 @@ fun HomeScreen(
         }
 
         if (showProgressDialog) {
-            ImportProgressDialog(progress = currentProgress, onDismiss = { showProgressDialog = false; progressFlow.value = IconPackImporter.ImportProgress() })
+            ImportProgressDialog(
+                progress = currentProgress,
+                onDismiss = { 
+                    showProgressDialog = false
+                    importJob = null
+                    progressFlow.value = IconPackImporter.ImportProgress() 
+                },
+                onCancel = {
+                    importJob?.cancel()
+                    importJob = null
+                    showProgressDialog = false
+                    progressFlow.value = IconPackImporter.ImportProgress()
+                }
+            )
         }
 
         if (projectToDelete != null) {
@@ -243,12 +346,8 @@ fun HomeScreen(
                         RetroButton(
                             onClick = {
                                 val p = projectToDelete!!
-                                isDeleting = true
                                 projectToDelete = null
-                                scope.launch {
-                                    viewModel.deleteProject(p).join()
-                                    isDeleting = false
-                                }
+                                viewModel.deleteProject(p)
                             },
                             containerColor = MaterialTheme.colorScheme.error,
                             contentColor = MaterialTheme.colorScheme.onError
@@ -256,19 +355,6 @@ fun HomeScreen(
                             Text("删除")
                         }
                     }
-                }
-            }
-        }
-
-        if (isDeleting) {
-            RetroDialog(onDismissRequest = {}) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text("正在删除项目", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("正在清理项目文件与数据库...", style = MaterialTheme.typography.bodyMedium)
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -308,7 +394,7 @@ fun ExpressiveProjectItem(
             
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                RetroDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("编辑") }, onClick = { showMenu = false; onEdit() }, leadingIcon = { Icon(Icons.Default.Edit, null) })
                     DropdownMenuItem(text = { Text("复制") }, onClick = { showMenu = false; onDuplicate() }, leadingIcon = { Icon(Icons.Default.ContentCopy, null) })
                     Divider()
@@ -327,7 +413,7 @@ fun EmptyState(onNewProject: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(24.dp))
         Text("开始制作第一个图标包", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("轻松设计并导出自定义图标。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text("轻松 design 并导出自定义图标。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Spacer(modifier = Modifier.height(32.dp))
         RetroButton(onClick = onNewProject, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp)) { Text("开始使用") }
     }
@@ -339,17 +425,19 @@ fun AddProjectDialog(
     initialName: String = "",
     initialPkg: String = "com.example.iconpack",
     initialIconPath: String? = null,
+    initialDescription: String = "",
     showDynamicOptions: Boolean = false,
     initialUseDynamicCalendar: Boolean = true,
     initialUseDynamicClock: Boolean = true,
     confirmLabel: String = "创建",
     onDismiss: () -> Unit,
-    onConfirm: (String, String, String?, Boolean, Boolean) -> Unit
+    onConfirm: (String, String, String?, String, Boolean, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var name by remember { mutableStateOf(initialName) }
     var pkg by remember { mutableStateOf(initialPkg) }
     var iconPath by remember { mutableStateOf(initialIconPath) }
+    var description by remember { mutableStateOf(initialDescription) }
     var useDynamicCalendar by remember { mutableStateOf(initialUseDynamicCalendar) }
     var useDynamicClock by remember { mutableStateOf(initialUseDynamicClock) }
     var nameError by remember { mutableStateOf<String?>(null) }
@@ -374,6 +462,7 @@ fun AddProjectDialog(
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(value = name, onValueChange = { name = it; nameError = if (it.isBlank()) "必填" else null }, label = { Text("项目名称") }, isError = nameError != null, supportingText = nameError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = pkg, onValueChange = { pkg = it; pkgError = if (!it.contains(".")) "包名格式无效" else null }, label = { Text("项目包名") }, isError = pkgError != null, supportingText = pkgError?.let { { Text(it) } }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("说明 / 备注") }, placeholder = { Text("说明 / 备注（可选）") }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (iconPath != null) {
@@ -389,9 +478,9 @@ fun AddProjectDialog(
                     Text(if (iconPath == null) "未选择项目图标" else "已选择项目图标", style = MaterialTheme.typography.labelMedium)
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RetroOutlinedButton(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.fillMaxWidth()) { Text("从图库选择") }
-                    RetroOutlinedButton(onClick = { fileLauncher.launch("*/*") }, modifier = Modifier.fillMaxWidth()) { Text("从文件选择") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RetroOutlinedButton(onClick = { galleryLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) { Text("从图库选择") }
+                    RetroOutlinedButton(onClick = { fileLauncher.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("从文件选择") }
                 }
                 if (showDynamicOptions) {
                     HorizontalDivider()
@@ -412,7 +501,7 @@ fun AddProjectDialog(
                 RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
                 Spacer(modifier = Modifier.width(8.dp))
                 RetroButton(
-                    onClick = { if (name.isNotBlank() && pkg.contains(".")) onConfirm(name, pkg, iconPath, useDynamicCalendar, useDynamicClock) },
+                    onClick = { if (name.isNotBlank() && pkg.contains(".")) onConfirm(name, pkg, iconPath, description, useDynamicCalendar, useDynamicClock) },
                     enabled = name.isNotBlank() && pkg.contains(".")
                 ) { Text(confirmLabel) }
             }
@@ -421,7 +510,11 @@ fun AddProjectDialog(
 }
 
 @Composable
-fun ImportProgressDialog(progress: IconPackImporter.ImportProgress, onDismiss: () -> Unit) {
+fun ImportProgressDialog(
+    progress: IconPackImporter.ImportProgress,
+    onDismiss: () -> Unit,
+    onCancel: () -> Unit
+) {
     RetroDialog(
         onDismissRequest = { if (progress.isFinished) onDismiss() }
     ) {
@@ -443,11 +536,15 @@ fun ImportProgressDialog(progress: IconPackImporter.ImportProgress, onDismiss: (
                 Spacer(modifier = Modifier.height(8.dp))
                 ProgressStatusItem("背景：${progress.backCount}", progress.backCount > 0)
             }
-            if (progress.isFinished) {
-                Spacer(modifier = Modifier.height(24.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (progress.isFinished) {
                     RetroButton(onClick = onDismiss) {
                         Text("确定")
+                    }
+                } else {
+                    RetroOutlinedButton(onClick = onCancel) {
+                        Text("取消")
                     }
                 }
             }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- These values are overwritten by Perficon's ApkGenerator at export time -->
+    <string name="app_name">Icon Pack</string>
+    <string name="pack_description"></string>
+    <string name="tab_about">关于</string>
+    <string name="tab_icons">图标</string>
+    <string name="tab_dynamic">动态图标</string>
+    <string name="search_hint">搜索图标名称或包名</string>
+    <string name="footer_line1">本图标包由 Perficon 导出创建。</string>
+    <string name="footer_line2">Presented by Kian</string>
+    <string name="no_results">未找到匹配的图标</string>
+    <string name="dynamic_calendar">动态日历</string>
+    <string name="dynamic_clock">动态时钟</string>
+    <string name="icon_count_format">共 %1$d 个图标</string>
+    <string name="icons_count_summary">%1$d / %2$d 个图标</string>
+    <string name="badge_calendar">日历</string>
+    <string name="badge_clock">时钟</string>
+</resources>

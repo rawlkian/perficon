@@ -21,6 +21,8 @@ class IconPackRepository(private val dao: IconPackDao) {
 
     suspend fun insertMapping(mapping: IconMapping) = dao.insertMapping(mapping)
 
+    suspend fun insertMappings(mappings: List<IconMapping>) = dao.insertMappings(mappings)
+
     suspend fun updateMapping(mapping: IconMapping) = dao.updateMapping(mapping)
 
     suspend fun deleteMapping(mapping: IconMapping) = dao.deleteMapping(mapping)

@@ -24,4 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Perficon"
 include(":app")
- 
+include(":template-app")
