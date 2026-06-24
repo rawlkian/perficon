@@ -147,6 +147,7 @@ fun ProjectEditorScreen(
     var exportProgress by remember { mutableStateOf<ApkGenerator.Progress?>(null) }
     var completedApk by remember { mutableStateOf<File?>(null) }
     var buildError by remember { mutableStateOf<String?>(null) }
+    var buildErrorDetails by remember { mutableStateOf<String?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val dynamicCalendarEnabled = project?.useDynamicCalendar == true
     val dynamicClockEnabled = project?.useDynamicClock == true
@@ -269,8 +270,11 @@ fun ProjectEditorScreen(
             } catch (e: Throwable) {
                 Log.e("ProjectEditor", "Failed to build APK", e)
                 val fullTrace = Log.getStackTraceString(e)
+                val appLanguage = AppSettings(context).language.value
+                val message = localize(e.message ?: e.toString(), appLanguage)
                 mainHandler.post {
-                    buildError = fullTrace
+                    buildError = message
+                    buildErrorDetails = fullTrace
                 }
             } finally {
                 exportProgress = null
@@ -290,9 +294,9 @@ fun ProjectEditorScreen(
                     title = { Text(project?.name ?: "编辑器") },
                     navigationIcon = { RetroIconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp)) { Icon(Icons.Default.ArrowBack, null) } },
                     actions = {
-                        RetroIconButton(onClick = { showProjectEditDialog = true }) { Icon(Icons.Default.Edit, "编辑项目") }
+                        RetroIconButton(onClick = { showProjectEditDialog = true }) { Icon(Icons.Default.Edit, localize("编辑项目", LocalAppLanguage.current)) }
                         Spacer(modifier = Modifier.width(8.dp))
-                        RetroIconButton(onClick = { showExportConfirmation = true }) { Icon(Icons.Default.Build, "导出") }
+                        RetroIconButton(onClick = { showExportConfirmation = true }) { Icon(Icons.Default.Build, localize("导出", LocalAppLanguage.current)) }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                 )
@@ -779,21 +783,54 @@ fun ProjectEditorScreen(
         }
 
         buildError?.let { errorMsg ->
+            var showDetails by remember { mutableStateOf(false) }
             RetroDialog(
-                onDismissRequest = { buildError = null }
+                onDismissRequest = {
+                    buildError = null
+                    buildErrorDetails = null
+                }
             ) {
                 Column(modifier = Modifier.padding(24.dp).fillMaxWidth()) {
                     Text("构建失败", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Box(modifier = Modifier.weight(1f, fill = false).heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                        Text(errorMsg, style = MaterialTheme.typography.bodyMedium)
+                    Text(errorMsg, style = MaterialTheme.typography.bodyMedium)
+
+                    buildErrorDetails?.let { details ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = if (showDetails) "隐藏详情" else "显示详情",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { showDetails = !showDetails }
+                        )
+                        if (showDetails) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .heightIn(max = 250.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
+                                    .padding(8.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                Text(
+                                    text = details,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                            }
+                        }
                     }
+
                     Spacer(modifier = Modifier.height(24.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        RetroButton(onClick = { buildError = null }) { Text("确定") }
+                        RetroButton(onClick = {
+                            buildError = null
+                            buildErrorDetails = null
+                        }) { Text("确定") }
                     }
                 }
             }
@@ -1403,8 +1440,8 @@ private fun ClockLayerSelector(label: String, path: String, onGallery: () -> Uni
             }
             Spacer(Modifier.width(10.dp))
             Text(label, modifier = Modifier.weight(1f))
-            IconButton(onClick = onGallery) { Icon(Icons.Default.Photo, "从图库选择") }
-            IconButton(onClick = onFile) { Icon(Icons.Default.FileOpen, "从文件选择") }
+            IconButton(onClick = onGallery) { Icon(Icons.Default.Photo, localize("从图库选择", LocalAppLanguage.current)) }
+            IconButton(onClick = onFile) { Icon(Icons.Default.FileOpen, localize("从文件选择", LocalAppLanguage.current)) }
         }
     }
 }
@@ -1513,7 +1550,7 @@ private fun CalendarDynamicCard(
                     Text("按日期切换图标的应用", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = { onDelete(mapping) }) {
-                    Icon(Icons.Default.Delete, contentDescription = "删除动态日历", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Default.Delete, contentDescription = localize("删除动态日历", LocalAppLanguage.current), tint = MaterialTheme.colorScheme.error)
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -1551,7 +1588,7 @@ private fun CalendarFrameItem(
     ) {
         AsyncImage(
             model = File(path),
-            contentDescription = "$day 日图标",
+            contentDescription = localize("$day 日图标", LocalAppLanguage.current),
             modifier = Modifier.size(64.dp).clip(MaterialTheme.shapes.small),
             contentScale = ContentScale.Crop
         )
@@ -1587,7 +1624,7 @@ private fun ClockDynamicCard(
                     Text("按当前时间旋转指针", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = { onDelete(mapping) }) {
-                    Icon(Icons.Default.Delete, contentDescription = "删除动态时钟", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Default.Delete, contentDescription = localize("删除动态时钟", LocalAppLanguage.current), tint = MaterialTheme.colorScheme.error)
                 }
             }
             Spacer(Modifier.height(12.dp))

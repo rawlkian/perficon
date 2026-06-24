@@ -51,7 +51,7 @@ fun SettingsScreen(
                 title = { Text("设置", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.Default.ArrowBack, contentDescription = localize("返回", LocalAppLanguage.current))
                     }
                 }
             )

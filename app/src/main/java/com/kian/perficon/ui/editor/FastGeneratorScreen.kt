@@ -1,5 +1,7 @@
 package com.kian.perficon.ui.editor
 
+import com.kian.perficon.ui.localize
+import com.kian.perficon.ui.LocalAppLanguage
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -56,6 +58,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -112,6 +117,79 @@ fun FastGeneratorScreen(
     var showIconTypeChoice by remember { mutableStateOf(false) }
     var showColorPicker by remember { mutableStateOf(false) }
     var isEyedropperActive by remember { mutableStateOf(false) }
+
+    var maskBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var backBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var uponBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(maskPath) {
+        val path = maskPath
+        maskBitmap = if (path != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    BitmapFactory.decodeFile(path)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        } else {
+            null
+        }
+    }
+    DisposableEffect(maskBitmap) {
+        val bitmap = maskBitmap
+        onDispose {
+            if (bitmap != null && !bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    LaunchedEffect(backPath) {
+        val path = backPath
+        backBitmap = if (path != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    BitmapFactory.decodeFile(path)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        } else {
+            null
+        }
+    }
+    DisposableEffect(backBitmap) {
+        val bitmap = backBitmap
+        onDispose {
+            if (bitmap != null && !bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    LaunchedEffect(uponPath) {
+        val path = uponPath
+        uponBitmap = if (path != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    BitmapFactory.decodeFile(path)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        } else {
+            null
+        }
+    }
+    DisposableEffect(uponBitmap) {
+        val bitmap = uponBitmap
+        onDispose {
+            if (bitmap != null && !bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+    }
 
     /*
      * 无论 Source Image 来自Gallery、原始图层还是标准图标，
@@ -186,7 +264,7 @@ fun FastGeneratorScreen(
                     IconButton(onClick = onCancel) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "取消"
+                            contentDescription = localize("取消", LocalAppLanguage.current)
                         )
                     }
                 },
@@ -195,10 +273,10 @@ fun FastGeneratorScreen(
                         onClick = {
                             val generated = generateFinalIcon(
                                 source = sourceBitmap,
-                                maskPath = maskPath,
-                                backPath = backPath,
+                                maskBitmap = maskBitmap,
+                                backBitmap = backBitmap,
                                 backgroundColor = backgroundColor,
-                                uponPath = uponPath,
+                                uponBitmap = uponBitmap,
                                 scale = scale,
                                 offset = offset,
                                 density = density.density
@@ -251,20 +329,20 @@ fun FastGeneratorScreen(
                  */
                 val previewBitmap = remember(
                     sourceBitmap,
-                    maskPath,
-                    backPath,
+                    maskBitmap,
+                    backBitmap,
                     backgroundColor,
-                    uponPath,
+                    uponBitmap,
                     scale,
                     offset,
                     density.density
                 ) {
                     generateFinalIcon(
                         source = sourceBitmap,
-                        maskPath = maskPath,
-                        backPath = backPath,
+                        maskBitmap = maskBitmap,
+                        backBitmap = backBitmap,
                         backgroundColor = backgroundColor,
-                        uponPath = uponPath,
+                        uponBitmap = uponBitmap,
                         scale = scale,
                         offset = offset,
                         density = density.density
@@ -333,7 +411,7 @@ fun FastGeneratorScreen(
                 ) {
                     Image(
                         bitmap = previewBitmap.asImageBitmap(),
-                        contentDescription = "生成图标预览",
+                        contentDescription = localize("生成图标预览", LocalAppLanguage.current),
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -381,7 +459,7 @@ fun FastGeneratorScreen(
                             Icon(
                                 imageVector =
                                     Icons.Default.SettingsBackupRestore,
-                                contentDescription = "恢复默认变换"
+                                contentDescription = localize("恢复默认变换", LocalAppLanguage.current)
                             )
                         }
                     }
@@ -513,7 +591,7 @@ fun FastGeneratorScreen(
                             Icon(
                                 imageVector =
                                     Icons.Default.SettingsBackupRestore,
-                                contentDescription = "恢复默认背景"
+                                contentDescription = localize("恢复默认背景", LocalAppLanguage.current)
                             )
                         }
                     }
@@ -729,7 +807,7 @@ fun AssetRow(
             ) {
                 Icon(
                     imageVector = Icons.Default.SettingsBackupRestore,
-                    contentDescription = "恢复默认",
+                    contentDescription = localize("恢复默认", LocalAppLanguage.current),
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -1286,10 +1364,10 @@ private fun applyNormalizedMask(
  */
 fun generateFinalIcon(
     source: Bitmap?,
-    maskPath: String?,
-    backPath: String?,
+    maskBitmap: Bitmap?,
+    backBitmap: Bitmap?,
     backgroundColor: Color?,
-    uponPath: String?,
+    uponBitmap: Bitmap?,
     scale: Float,
     offset: Offset,
     density: Float
@@ -1336,20 +1414,13 @@ fun generateFinalIcon(
             )
         }
 
-        backPath != null -> {
-            BitmapFactory.decodeFile(backPath)
-                ?.let { backgroundBitmap ->
-                    contentCanvas.drawBitmap(
-                        backgroundBitmap,
-                        null,
-                        outputRect,
-                        normalPaint
-                    )
-
-                    if (!backgroundBitmap.isRecycled) {
-                        backgroundBitmap.recycle()
-                    }
-                }
+        backBitmap != null -> {
+            contentCanvas.drawBitmap(
+                backBitmap,
+                null,
+                outputRect,
+                normalPaint
+            )
         }
     }
 
@@ -1437,12 +1508,7 @@ fun generateFinalIcon(
     //
     // 对 Background + Source Image 的整体结果只裁切一次。
     // ====================================================
-    val decodedMask = maskPath
-        ?.let { path ->
-            BitmapFactory.decodeFile(path)
-        }
-
-    val shapeMask = decodedMask
+    val shapeMask = maskBitmap
         ?.let { mask ->
             createNormalizedShapeMask(
                 sourceMask = mask,
@@ -1470,20 +1536,13 @@ fun generateFinalIcon(
     // ====================================================
     // Layer 4：Overlay
     // ====================================================
-    if (uponPath != null) {
-        BitmapFactory.decodeFile(uponPath)
-            ?.let { overlayBitmap ->
-                resultCanvas.drawBitmap(
-                    overlayBitmap,
-                    null,
-                    outputRect,
-                    normalPaint
-                )
-
-                if (!overlayBitmap.isRecycled) {
-                    overlayBitmap.recycle()
-                }
-            }
+    if (uponBitmap != null && !uponBitmap.isRecycled) {
+        resultCanvas.drawBitmap(
+            uponBitmap,
+            null,
+            outputRect,
+            normalPaint
+        )
     }
 
     if (!contentLayer.isRecycled) {
@@ -1495,13 +1554,6 @@ fun generateFinalIcon(
         !shapeMask.isRecycled
     ) {
         shapeMask.recycle()
-    }
-
-    if (
-        decodedMask != null &&
-        !decodedMask.isRecycled
-    ) {
-        decodedMask.recycle()
     }
 
     return resultBitmap

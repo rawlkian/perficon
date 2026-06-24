@@ -141,10 +141,10 @@ fun HomeScreen(
                 title = { Text("Perficon", style = MaterialTheme.typography.titleLarge) },
                 actions = {
                     IconButton(onClick = onNavigateToAbout) {
-                        Icon(Icons.Default.Info, contentDescription = "关于")
+                        Icon(Icons.Default.Info, contentDescription = localize("关于", LocalAppLanguage.current))
                     }
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
+                        Icon(Icons.Default.Settings, contentDescription = localize("设置", LocalAppLanguage.current))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -393,7 +393,7 @@ fun ExpressiveProjectItem(
             }
             
             Box {
-                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, localize("更多", LocalAppLanguage.current)) }
                 RetroDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("编辑") }, onClick = { showMenu = false; onEdit() }, leadingIcon = { Icon(Icons.Default.Edit, null) })
                     DropdownMenuItem(text = { Text("复制") }, onClick = { showMenu = false; onDuplicate() }, leadingIcon = { Icon(Icons.Default.ContentCopy, null) })

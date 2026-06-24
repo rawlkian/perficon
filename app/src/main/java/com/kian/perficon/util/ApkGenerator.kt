@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import com.kian.perficon.model.IconMapping
 import com.kian.perficon.model.IconPackProject
+import com.kian.perficon.ui.AppSettings
+import com.kian.perficon.ui.localize
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
@@ -52,6 +54,9 @@ class ApkGenerator(private val context: Context) {
         mappings: List<IconMapping>,
         onProgress: (Progress) -> Unit = {}
     ): File {
+        val appLanguage = AppSettings(context).language.value
+        fun trans(key: String): String = localize(key, appLanguage)
+
         val outputDir = StorageHelper.outputsDir
         val safeName = project.name.replace("[^\\p{L}\\p{N}]".toRegex(), "_")
         val outputApk = File(outputDir, "$safeName.apk")
@@ -60,18 +65,18 @@ class ApkGenerator(private val context: Context) {
         val workspace = File(projectRoot, ".build")
 
         try {
-            onProgress(Progress(1, "正在准备导出"))
+            onProgress(Progress(1, trans("正在准备导出")))
             if (workspace.exists()) workspace.deleteRecursively()
             check(workspace.mkdirs()) { "Unable to create the APK build workspace." }
             val unsignedApk = File(workspace, "unsigned.apk")
             val baseApk = File(workspace, "template.apk")
             try {
-                onProgress(Progress(2, "正在加载图标包模板"))
+                onProgress(Progress(2, trans("正在加载图标包模板")))
                 context.assets.open("base.apk").use { input ->
                     FileOutputStream(baseApk).use(input::copyTo)
                 }
             } catch (e: Exception) {
-                throw GenerationException("图标包模板（base.apk）缺失或无法读取。", e)
+                throw GenerationException(trans("图标包模板（base.apk）缺失或无法读取。"), e)
             }
 
             val mappedEntries = mappings.filter { it.targetPackageName.isNotBlank() }
@@ -94,14 +99,14 @@ class ApkGenerator(private val context: Context) {
             val calendarGroups = calendarMappings.groupBy { calendarArtworkKey(it) }
             val uniqueCalendarCount = calendarGroups.size
             if (uniqueCalendarCount > DYNAMIC_CALENDAR_SLOT_COUNT) {
-                throw GenerationException("当前模板最多支持 $DYNAMIC_CALENDAR_SLOT_COUNT 个动态日历图标。")
+                throw GenerationException(trans("当前模板最多支持 $DYNAMIC_CALENDAR_SLOT_COUNT 个动态日历图标。"))
             }
 
             // Group clock mappings by their artwork fingerprint.
             val clockGroups = clockMappings.groupBy { clockArtworkKey(it) }
             val uniqueClockCount = clockGroups.size
             if (uniqueClockCount > DYNAMIC_CLOCK_SLOT_COUNT) {
-                throw GenerationException("当前模板最多支持 $DYNAMIC_CLOCK_SLOT_COUNT 个动态时钟图标。")
+                throw GenerationException(trans("当前模板最多支持 $DYNAMIC_CLOCK_SLOT_COUNT 个动态时钟图标。"))
             }
 
             // Older projects only stored a package name. Resolve its real launcher Activity
@@ -135,7 +140,7 @@ class ApkGenerator(private val context: Context) {
             val countingOut = CountingOutputStream(FileOutputStream(unsignedApk))
             ZipOutputStream(countingOut).use { zos ->
                 ZipFile(baseApk).use { zip ->
-                    onProgress(Progress(3, "正在写入图标与映射"))
+                    onProgress(Progress(3, trans("正在写入图标与映射")))
                     val slotsResult = findAllTemplateSlots(zip)
                     val slots = slotsResult.staticSlots
                     val calendarSlots = slotsResult.calendarSlots
@@ -147,14 +152,14 @@ class ApkGenerator(private val context: Context) {
                     val uniqueIconPaths = resolvedMappings.map { it.iconPath }.distinct()
                     if (uniqueIconPaths.size > slots.size) {
                         throw GenerationException(
-                            "图标包模板最多支持 ${slots.size} 个静态图标，当前项目有 ${uniqueIconPaths.size} 个独特静态图标，请减少图标数量或使用支持更多槽位的模板。"
+                            trans("图标包模板最多支持 ${slots.size} 个静态图标，当前项目有 ${uniqueIconPaths.size} 个独特静态图标，请减少图标数量或使用支持更多槽位的模板。")
                         )
                     }
                     if (uniqueCalendarCount > calendarSlots.size) {
-                        throw GenerationException("模板只包含 ${calendarSlots.size} 组完整的动态日历资源。")
+                        throw GenerationException(trans("模板只包含 ${calendarSlots.size} 组完整的动态日历资源。"))
                     }
                     if (uniqueClockCount > clockSlots.size) {
-                        throw GenerationException("模板只包含 ${clockSlots.size} 组完整的动态时钟资源。")
+                        throw GenerationException(trans("模板只包含 ${clockSlots.size} 组完整的动态时钟资源。"))
                     }
 
                     // Map unique iconPath to template slots
@@ -224,12 +229,13 @@ class ApkGenerator(private val context: Context) {
                     if (missingFiles.isNotEmpty()) {
                         val missingFilePaths = missingFiles.map { it.absolutePath }.toSet()
                         val details = mutableListOf<String>()
+                        val isEnglish = appLanguage == com.kian.perficon.ui.AppLanguage.English || (appLanguage == com.kian.perficon.ui.AppLanguage.System && java.util.Locale.getDefault().language.startsWith("en"))
 
                         // Check static mappings
                         resolvedMappings.forEach { mapping ->
                             val f = File(mapping.iconPath)
                             if (f.absolutePath in missingFilePaths) {
-                                details += "静态图标: ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
+                                details += "${trans("静态图标")}: ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
                             }
                         }
 
@@ -239,7 +245,8 @@ class ApkGenerator(private val context: Context) {
                             frames.forEachIndexed { idx, framePath ->
                                 val f = File(framePath)
                                 if (f.absolutePath in missingFilePaths) {
-                                    details += "动态日历 (第 ${idx + 1} 天): ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
+                                    val dayStr = if (isEnglish) "Day ${idx + 1}" else "第 ${idx + 1} 天"
+                                    details += "${trans("动态日历")} ($dayStr): ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
                                 }
                             }
                         }
@@ -256,7 +263,7 @@ class ApkGenerator(private val context: Context) {
                             clockFiles.forEach { (layerName, path) ->
                                 val f = File(path)
                                 if (f.absolutePath in missingFilePaths) {
-                                    details += "动态时钟 ($layerName): ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
+                                    details += "${trans("动态时钟")} (${trans(layerName)}): ${mapping.iconName} (${mapping.targetPackageName}) -> ${f.absolutePath}"
                                 }
                             }
                         }
@@ -264,11 +271,11 @@ class ApkGenerator(private val context: Context) {
                         // Fallback if not matched
                         if (details.isEmpty()) {
                             missingFiles.forEach { f ->
-                                details += "未知文件: ${f.absolutePath}"
+                                details += "${trans("未知文件")}: ${f.absolutePath}"
                             }
                         }
 
-                        throw GenerationException("以下项目图标文件不存在：\n" + details.joinToString("\n"))
+                        throw GenerationException(trans("以下项目图标文件不存在：\n") + details.joinToString("\n"))
                     }
 
                     val resolvedStaticSlotIndices = resolvedMappings.map { iconPathToSlot.getValue(it.iconPath).index }
@@ -471,9 +478,9 @@ class ApkGenerator(private val context: Context) {
                 }
             }
 
-            onProgress(Progress(4, "正在签名 APK"))
+            onProgress(Progress(4, trans("正在签名 APK")))
             ApkSignerUtil.sign(context, unsignedApk, outputApk)
-            onProgress(Progress(5, "正在完成导出"))
+            onProgress(Progress(5, trans("正在完成导出")))
             return outputApk
         } catch (e: Throwable) {
             runCatching { outputApk.delete() }
@@ -483,7 +490,7 @@ class ApkGenerator(private val context: Context) {
                 .map { " → ${it::class.java.simpleName}: ${it.message ?: it::class.java.name}" }
                 .joinToString("")
             throw if (e is GenerationException) e else GenerationException(
-                "构建 APK 失败：[$errorType] $detail$causeChain", e
+                trans("构建 APK 失败：") + "[$errorType] $detail$causeChain", e
             )
         } finally {
             runCatching { workspace.deleteRecursively() }

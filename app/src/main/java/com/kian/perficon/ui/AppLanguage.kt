@@ -98,17 +98,18 @@ fun localize(value: String, language: AppLanguage): String {
     if (english) {
         englishText[value]?.let { return it }
         return when {
-            value.startsWith("正在搜索 ") -> value.replaceFirst("正在搜索", "Searching")
-            value.startsWith("步骤 ") -> value.replaceFirst("步骤", "Step")
-            value.startsWith("已生成 ") -> value.replaceFirst("已生成", "Generated")
+            value.startsWith("正在搜索 ") -> "Searching ${localize(value.removePrefix("正在搜索 "), language)}"
+            value.startsWith("步骤 ") -> "Step ${localize(value.removePrefix("步骤 "), language)}"
+            value.startsWith("已生成 ") -> "Generated ${localize(value.removePrefix("已生成 "), language)}"
             value.endsWith(" 日") -> "Day ${value.removeSuffix(" 日")}" 
-            value.startsWith("缩放：") -> "Scale: ${value.removePrefix("缩放：")}" 
-            value.startsWith("错误：") -> "Error: ${value.removePrefix("错误：")}" 
-            value.startsWith("已处理：") -> "Processed: ${value.removePrefix("已处理：")}" 
-            value.startsWith("背景：") -> "Backgrounds: ${value.removePrefix("背景：")}" 
-            value.startsWith("导入 ") -> "Import ${value.removePrefix("导入 ")}" 
-            value.startsWith("确定要删除“") -> "Delete ${value.removePrefix("确定要删除“").substringBefore("”")}? This action cannot be undone."
-            value.endsWith(" 已保存到下载目录") -> "${value.removeSuffix(" 已保存到下载目录")} saved to downloads directory"
+            value.endsWith(" 日图标") -> "Day ${value.removeSuffix(" 日图标")} icon"
+            value.startsWith("缩放：") -> "Scale: ${localize(value.removePrefix("缩放："), language)}" 
+            value.startsWith("错误：") -> "Error: ${localize(value.removePrefix("错误："), language)}" 
+            value.startsWith("已处理：") -> "Processed: ${localize(value.removePrefix("已处理："), language)}" 
+            value.startsWith("背景：") -> "Backgrounds: ${localize(value.removePrefix("背景："), language)}" 
+            value.startsWith("导入 ") -> "Import ${localize(value.removePrefix("导入 "), language)}" 
+            value.startsWith("确定要删除“") -> "Delete ${localize(value.removePrefix("确定要删除“").substringBefore("”"), language)}? This action cannot be undone."
+            value.endsWith(" 已保存到下载目录") -> "${localize(value.removeSuffix(" 已保存到下载目录"), language)} saved to downloads directory"
             value.startsWith("当前模板最多支持 ") && value.endsWith(" 个动态日历图标。") -> {
                 val num = value.removePrefix("当前模板最多支持 ").removeSuffix(" 个动态日历图标。")
                 "The current template supports a maximum of $num dynamic calendar icons."
@@ -125,6 +126,13 @@ fun localize(value: String, language: AppLanguage): String {
                 val num = value.removePrefix("模板只包含 ").removeSuffix(" 组完整的动态时钟资源。")
                 "The template only contains $num complete dynamic clock asset sets."
             }
+            value.startsWith("图标包模板最多支持 ") && value.contains(" 个静态图标，当前项目有 ") && value.contains(" 个独特静态图标，请减少图标数量或使用支持更多槽位的模板。") -> {
+                val parts = value.removePrefix("图标包模板最多支持 ").split(" 个静态图标，当前项目有 ")
+                val slots = parts.firstOrNull() ?: ""
+                val icons = parts.getOrNull(1)?.substringBefore(" 个独特静态图标") ?: ""
+                "The template supports at most $slots static icons, but the project has $icons unique static icons. Please reduce icon count or use a template that supports more slots."
+            }
+            value.startsWith("构建 APK 失败：") -> "Failed to build APK: ${localize(value.removePrefix("构建 APK 失败："), language)}"
             else -> value
         }
     }
@@ -310,7 +318,42 @@ private val englishText = mapOf(
     "正在签名 APK" to "Signing APK",
     "正在完成导出" to "Completing export",
     "正在删除项目" to "Deleting project",
-    "正在清理项目文件与数据库..." to "Cleaning up project files and database..."
+    "正在清理项目文件与数据库..." to "Cleaning up project files and database...",
+    "关于" to "About",
+    "返回" to "Back",
+    "作者：Kian" to "Author: Kian",
+    "恢复默认" to "Restore default",
+    "更换" to "Replace",
+    "欢迎使用 Perficon ！" to "Welcome to Perficon!",
+    "您可以选择完全从新创建图标包或者导入已安装的图标包！现在就开始你的图标包创作之旅吧！" to "You can create an icon pack from scratch or import an installed icon pack! Start your icon pack creation journey now!",
+    "更多" to "More",
+    "轻松 design 并导出自定义图标。" to "Design and export custom icon packs easily.",
+    "新建图标包" to "Create icon pack",
+    "创建" to "Create",
+    "说明 / 备注" to "Description",
+    "说明 / 备注（可选）" to "Description (optional)",
+    "正在启动构建" to "Starting build...",
+    "无法将 APK 保存到下载目录。" to "Failed to save APK to downloads directory.",
+    "编辑器" to "Editor",
+    "导出" to "Export",
+    "将创建缺省表盘与指针图层，并按图标包模板默认时钟应用规则导出。" to "This creates default clock face and hand layers, and exports with template clock rules.",
+    "构建失败" to "Build failed",
+    "从相册选择" to "Choose from gallery",
+    "编辑动态日历" to "Edit dynamic calendar",
+    "编辑动态时钟" to "Edit dynamic clock",
+    "包含表盘与指针图层的图标" to "Icon containing clock face and hands",
+    "应用于所有图标的裁切形状" to "Clipping shape applied to all icons",
+    "显示在图标最上方的覆盖层" to "Overlay layer displayed on top of all icons",
+    "背景图片" to "Background image",
+    "图标背景" to "Icon background",
+    "图标包模板（base.apk）缺失或无法读取。" to "Icon pack template (base.apk) is missing or unreadable.",
+    "静态图标" to "Static icon",
+    "动态日历" to "Dynamic calendar",
+    "动态时钟" to "Dynamic clock",
+    "未知文件" to "Unknown file",
+    "以下项目图标文件不存在：\n" to "The following project icon files do not exist:\n",
+    "导入被取消" to "Import cancelled",
+    "构建 APK 失败：" to "Failed to build APK: "
 )
 
 private val chineseText = mapOf(
