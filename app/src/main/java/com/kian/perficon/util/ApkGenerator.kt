@@ -327,9 +327,42 @@ class ApkGenerator(private val context: Context) {
                         resourceReplacements["resources.arsc"] = patchedArsc
                     }
 
-                    val projectIcon = project.projectIconPath
+                    var projectIcon = project.projectIconPath
                         ?.let(::File)
                         ?.takeIf(File::isFile)
+
+                    if (projectIcon == null) {
+                        projectIcon = try {
+                            var drawable = androidx.core.content.ContextCompat.getDrawable(
+                                context,
+                                com.kian.perficon.R.mipmap.ic_launcher
+                            )
+                            if (drawable == null) {
+                                val pm = context.packageManager
+                                val appInfo = pm.getApplicationInfo(context.packageName, 0)
+                                drawable = appInfo.loadIcon(pm)
+                            }
+                            if (drawable != null) {
+                                val width = drawable.intrinsicWidth.coerceAtLeast(512)
+                                val height = drawable.intrinsicHeight.coerceAtLeast(512)
+                                val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                                val canvas = android.graphics.Canvas(bitmap)
+                                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                                drawable.draw(canvas)
+                                
+                                val tempFile = File(context.cacheDir, "perficon_fallback_icon.png")
+                                FileOutputStream(tempFile).use { out ->
+                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                                }
+                                bitmap.recycle()
+                                tempFile.takeIf { it.isFile }
+                            } else null
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            null
+                        }
+                    }
+
                     val activeClockSlots = resolvedClockSlotIndices.toSet()
                     val staticSlotPattern = Regex("^res/drawable[^/]*/icon_(\\d+)\\.png$")
                     val calendarPattern = Regex("^(.*/)calendar_(\\d+)_(\\d+)\\.png$")
