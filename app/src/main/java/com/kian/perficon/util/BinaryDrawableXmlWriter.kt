@@ -52,7 +52,7 @@ object BinaryDrawableXmlWriter {
         categories.forEach { category ->
             category.entries.forEach { entry ->
                 strings += entry.drawable
-                strings += entry.mapping.iconName.ifBlank { entry.mapping.targetPackageName }
+                strings += entry.mapping.displayLabel()
             }
         }
         val allStrings = strings.toList()
@@ -70,7 +70,7 @@ object BinaryDrawableXmlWriter {
                     indexes.getValue("item"),
                     listOf(
                             indexes.getValue("drawable") to indexes.getValue(entry.drawable),
-                            indexes.getValue("name") to indexes.getValue(entry.mapping.iconName.ifBlank { entry.mapping.targetPackageName })
+                            indexes.getValue("name") to indexes.getValue(entry.mapping.displayLabel())
                     )
                 )
                 writeEnd(indexes.getValue("item"))
@@ -99,6 +99,9 @@ object BinaryDrawableXmlWriter {
     private data class Category(val title: String, val entries: List<Entry>)
 
     private data class Entry(val mapping: IconMapping, val drawable: String)
+
+    private fun IconMapping.displayLabel(): String =
+        targetPackageName.substringAfterLast(".").ifBlank { targetPackageName }
 
     private fun buildStringPool(strings: List<String>): ByteArray {
         val data = ByteArrayOutputStream()

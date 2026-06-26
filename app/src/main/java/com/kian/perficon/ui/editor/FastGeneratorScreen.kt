@@ -51,6 +51,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -85,21 +86,25 @@ import com.kian.perficon.ui.AppPicker
 import com.kian.perficon.ui.Text
 import com.kian.perficon.ui.components.*
 import com.kian.perficon.util.StorageHelper
+import com.kian.perficon.util.getInstalledApps
 import com.kian.perficon.util.saveIconToInternalStorage
 import androidx.compose.foundation.BorderStroke
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FastGeneratorScreen(
     iconName: String,
+    targetPackageName: String,
     project: IconPackProject,
     onSave: (String) -> Unit,
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val screenTitle = iconName.ifBlank { targetPackageName.substringAfterLast(".").ifBlank { "快速生成" } }
 
     // 当前Fast Gen会话中的临时参数。
     var scale by remember { mutableFloatStateOf(project.scaleFactor) }
@@ -210,6 +215,16 @@ fun FastGeneratorScreen(
         offset = Offset.Zero
     }
 
+    LaunchedEffect(targetPackageName) {
+        if (targetPackageName.isBlank() || sourceBitmap != null) return@LaunchedEffect
+        val drawable = withContext(Dispatchers.IO) {
+            getInstalledApps(context).firstOrNull { it.packageName == targetPackageName }?.icon
+        }
+        drawable?.let {
+            replaceSourceBitmap(drawableToOriginalBitmap(it, 512))
+        }
+    }
+
     val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -258,7 +273,7 @@ fun FastGeneratorScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Text(iconName)
+                    Text(screenTitle)
                 },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
@@ -360,7 +375,7 @@ fun FastGeneratorScreen(
                 Box(
                     modifier = Modifier
                         .size(192.dp)
-                        .background(Color.White)
+                        .background(Color.Transparent)
                         .pointerInput(isEyedropperActive) {
                             if (isEyedropperActive) {
                                 detectTapGestures { tapOffset ->
@@ -751,6 +766,7 @@ fun FastGeneratorScreen(
 
         if (showColorPicker) {
             ColorPickerDialog(
+                initialColor = backgroundColor,
                 onDismiss = {
                     showColorPicker = false
                 },
@@ -830,10 +846,38 @@ fun AssetRow(
 
 @Composable
 fun ColorPickerDialog(
+    initialColor: Color?,
     onDismiss: () -> Unit,
     onEyedropper: () -> Unit,
     onColorSelected: (Color) -> Unit
 ) {
+    fun channel(value: Float): Int = (value.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    fun toHex(red: Int, green: Int, blue: Int): String = "#%02X%02X%02X".format(red, green, blue)
+    fun parseHex(value: String): Color? {
+        val raw = value.trim().removePrefix("#")
+        if (raw.length != 6 || raw.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) return null
+        val intValue = raw.toInt(16)
+        return Color(
+            red = (intValue shr 16 and 0xff) / 255f,
+            green = (intValue shr 8 and 0xff) / 255f,
+            blue = (intValue and 0xff) / 255f,
+            alpha = 1f
+        )
+    }
+
+    var red by remember(initialColor) { mutableFloatStateOf((initialColor?.let { channel(it.red) } ?: 255).toFloat()) }
+    var green by remember(initialColor) { mutableFloatStateOf((initialColor?.let { channel(it.green) } ?: 255).toFloat()) }
+    var blue by remember(initialColor) { mutableFloatStateOf((initialColor?.let { channel(it.blue) } ?: 255).toFloat()) }
+    var hexInput by remember(initialColor) {
+        mutableStateOf(toHex(red.roundToInt(), green.roundToInt(), blue.roundToInt()))
+    }
+    val selectedColor = Color(
+        red = red.roundToInt() / 255f,
+        green = green.roundToInt() / 255f,
+        blue = blue.roundToInt() / 255f,
+        alpha = 1f
+    )
+
     val commonColors = listOf(
         Color.Red,
         Color(0xFF4CAF50),
@@ -871,6 +915,46 @@ fun ColorPickerDialog(
 
             Spacer(Modifier.height(24.dp))
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(selectedColor, MaterialTheme.shapes.medium)
+                )
+                Spacer(Modifier.width(12.dp))
+                OutlinedTextField(
+                    value = hexInput,
+                    onValueChange = { value ->
+                        hexInput = value
+                        parseHex(value)?.let { parsed ->
+                            red = channel(parsed.red).toFloat()
+                            green = channel(parsed.green).toFloat()
+                            blue = channel(parsed.blue).toFloat()
+                        }
+                    },
+                    label = { Text("HEX") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            ColorChannelSlider("R", red, Color.Red) {
+                red = it
+                hexInput = toHex(red.roundToInt(), green.roundToInt(), blue.roundToInt())
+            }
+            ColorChannelSlider("G", green, Color(0xFF4CAF50)) {
+                green = it
+                hexInput = toHex(red.roundToInt(), green.roundToInt(), blue.roundToInt())
+            }
+            ColorChannelSlider("B", blue, Color(0xFF2196F3)) {
+                blue = it
+                hexInput = toHex(red.roundToInt(), green.roundToInt(), blue.roundToInt())
+            }
+
+            Spacer(Modifier.height(16.dp))
+
             RetroOutlinedButton(
                 onClick = onEyedropper,
                 modifier = Modifier.fillMaxWidth()
@@ -887,8 +971,23 @@ fun ColorPickerDialog(
                 RetroOutlinedButton(onClick = onDismiss) {
                     Text("取消")
                 }
+                Spacer(Modifier.width(8.dp))
+                RetroButton(onClick = { onColorSelected(selectedColor) }) {
+                    Text("确认")
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun ColorChannelSlider(label: String, value: Float, color: Color, onValueChange: (Float) -> Unit) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.width(24.dp), fontWeight = FontWeight.Bold, color = color)
+            Text(value.roundToInt().toString(), style = MaterialTheme.typography.labelSmall)
+        }
+        Slider(value = value, onValueChange = onValueChange, valueRange = 0f..255f)
     }
 }
 

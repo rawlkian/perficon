@@ -116,6 +116,7 @@ fun MainApp(appSettings: AppSettings) {
             
             FastGeneratorScreen(
                 iconName = iconName,
+                targetPackageName = targetPackage,
                 project = project,
                 onSave = { path ->
                     if (isChange && mappingId != 0L) {

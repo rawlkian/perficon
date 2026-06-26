@@ -28,19 +28,32 @@ object BinaryAppFilterWriter {
         calendarSlotIndices: List<Int> = emptyList(),
         clockMappings: List<IconMapping> = emptyList(),
         clockSlotIndices: List<Int> = emptyList(),
-        scaleFactor: Float? = null
+        scaleFactor: Float? = null,
+        iconMaskDrawable: String? = null,
+        iconBackDrawables: List<String> = emptyList(),
+        iconUponDrawable: String? = null
     ): ByteArray {
         require(staticMappings.size == staticSlotIndices.size) { "Static mappings and template slots must match." }
         require(calendarMappings.size == calendarSlotIndices.size) { "Calendar mappings and template slots must match." }
         require(clockMappings.size == clockSlotIndices.size) { "Clock mappings and template slots must match." }
 
         val strings = linkedSetOf(
-            "resources", "item", "calendar", "dynamic-clock", "scale",
+            "resources", "item", "calendar", "dynamic-clock", "scale", "iconmask", "iconback", "iconupon",
             "component", "drawable", "prefix", "factor",
             "defaultHour", "defaultMinute", "defaultSecond",
             "hourLayerIndex", "minuteLayerIndex", "secondLayerIndex",
             "10", "30", "1", "2", "3"
         )
+        val styleAttributes = buildList {
+            if (iconMaskDrawable != null || iconUponDrawable != null || iconBackDrawables.isNotEmpty()) {
+                val maxCount = maxOf(iconBackDrawables.size, 1)
+                repeat(maxCount) { add("img${it + 1}") }
+            }
+        }
+        strings += styleAttributes
+        iconMaskDrawable?.let { strings += it }
+        iconBackDrawables.forEach { strings += it }
+        iconUponDrawable?.let { strings += it }
         staticMappings.zip(staticSlotIndices).forEach { (mapping, slotIndex) ->
             strings += componentName(mapping)
             strings += "icon_$slotIndex"
@@ -66,6 +79,29 @@ object BinaryAppFilterWriter {
                     listOf(indexes.getValue("factor") to indexes.getValue(factor.toString()))
                 )
                 writeEndElement(indexes.getValue("scale"))
+            }
+            iconMaskDrawable?.let { drawable ->
+                writeStartElement(
+                    indexes.getValue("iconmask"),
+                    listOf(indexes.getValue("img1") to indexes.getValue(drawable))
+                )
+                writeEndElement(indexes.getValue("iconmask"))
+            }
+            if (iconBackDrawables.isNotEmpty()) {
+                writeStartElement(
+                    indexes.getValue("iconback"),
+                    iconBackDrawables.mapIndexed { index, drawable ->
+                        indexes.getValue("img${index + 1}") to indexes.getValue(drawable)
+                    }
+                )
+                writeEndElement(indexes.getValue("iconback"))
+            }
+            iconUponDrawable?.let { drawable ->
+                writeStartElement(
+                    indexes.getValue("iconupon"),
+                    listOf(indexes.getValue("img1") to indexes.getValue(drawable))
+                )
+                writeEndElement(indexes.getValue("iconupon"))
             }
             staticMappings.zip(staticSlotIndices).forEach { (mapping, slotIndex) ->
                 writeStartElement(

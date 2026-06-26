@@ -7,7 +7,7 @@ import java.io.File
 
 class BinaryDrawableXmlWriterTest {
     @Test
-    fun writesCustomDisplayNamesForCandyBar() {
+    fun writesPackageTailDisplayNamesForCandyBar() {
         val xml = BinaryDrawableXmlWriter.build(
             mappings = listOf(
                 IconMapping(
@@ -29,8 +29,8 @@ class BinaryDrawableXmlWriterTest {
 
         val content = xml.decodeToString()
         assertTrue(content.contains("全部图标"))
-        assertTrue(content.contains("音乐"))
-        assertTrue(content.contains("com.example.camera"))
+        assertTrue(content.contains("music"))
+        assertTrue(content.contains("camera"))
         File("build/test-output").apply { mkdirs() }
             .resolve("drawable.xml")
             .writeBytes(xml)
@@ -65,8 +65,8 @@ class BinaryDrawableXmlWriterTest {
         ).decodeToString()
 
         assertTrue(content.contains("动态日历"))
-        assertTrue(content.contains("我的日历"))
+        assertTrue(content.contains("calendar"))
         assertTrue(content.contains("动态时钟"))
-        assertTrue(content.contains("我的时钟"))
+        assertTrue(content.contains("clock"))
     }
 }

@@ -34,6 +34,12 @@ class ApkGenerator(private val context: Context) {
         val entryName: String
     )
 
+    private data class StyleDrawableSlots(
+        val mask: String?,
+        val backs: List<String>,
+        val upon: String?
+    )
+
     /**
      * Fingerprint key that identifies a unique set of calendar day artwork.
      * Two calendar mappings that reference the exact same 31 image files
@@ -162,8 +168,43 @@ class ApkGenerator(private val context: Context) {
                         throw GenerationException(trans("模板只包含 ${clockSlots.size} 组完整的动态时钟资源。"))
                     }
 
-                    // Map unique iconPath to template slots
-                    val iconPathToSlot = uniqueIconPaths.zip(slots).toMap()
+                    val styleFiles = buildList {
+                        project.iconMaskPath?.let(::File)?.takeIf(File::isFile)?.let { add("mask" to it) }
+                        project.iconBackPaths
+                            ?.split(",")
+                            ?.filter(String::isNotBlank)
+                            ?.map(::File)
+                            ?.filter(File::isFile)
+                            ?.forEach { add("back" to it) }
+                        project.iconUponPath?.let(::File)?.takeIf(File::isFile)?.let { add("upon" to it) }
+                    }
+                    if (uniqueIconPaths.size + styleFiles.size > slots.size) {
+                        throw GenerationException(
+                            trans("图标包模板最多支持 ${slots.size} 个静态/样式资源，当前项目需要 ${uniqueIconPaths.size + styleFiles.size} 个槽位，请减少图标数量或样式图片数量。")
+                        )
+                    }
+
+                    val styleSlots = slots.take(styleFiles.size)
+                    val mappingSlots = slots.drop(styleFiles.size).take(uniqueIconPaths.size)
+
+                    val styleEntryReplacements = styleFiles.zip(styleSlots).associate { (styleFile, slot) ->
+                        slot.entryName to styleFile.second
+                    }
+                    val maskDrawable = styleFiles.zip(styleSlots)
+                        .firstOrNull { it.first.first == "mask" }
+                        ?.second
+                        ?.let { "icon_${it.index}" }
+                    val backDrawables = styleFiles.zip(styleSlots)
+                        .filter { it.first.first == "back" }
+                        .map { "icon_${it.second.index}" }
+                    val uponDrawable = styleFiles.zip(styleSlots)
+                        .firstOrNull { it.first.first == "upon" }
+                        ?.second
+                        ?.let { "icon_${it.index}" }
+                    val styleDrawableSlots = StyleDrawableSlots(maskDrawable, backDrawables, uponDrawable)
+
+                    // Map unique iconPath to template slots.
+                    val iconPathToSlot = uniqueIconPaths.zip(mappingSlots).toMap()
 
                     // Map our sequential slot counter (1-based) to actual template slot indices
                     val calendarSlotMap = calendarSlots.take(uniqueCalendarCount)
@@ -177,7 +218,7 @@ class ApkGenerator(private val context: Context) {
                     // Only replace slots for unique icon files
                     val replacements = iconPathToSlot.entries.associate { (iconPath, slot) ->
                         slot.entryName to File(iconPath)
-                    }
+                    } + styleEntryReplacements
 
 
                     val expandedCalendarMappings = mutableListOf<IconMapping>()
@@ -287,7 +328,10 @@ class ApkGenerator(private val context: Context) {
                         calendarSlotIndices = expandedCalendarSlotIndices,
                         clockMappings = expandedClockMappings,
                         clockSlotIndices = expandedClockSlotIndices,
-                        scaleFactor = project.scaleFactor
+                        scaleFactor = project.scaleFactor,
+                        iconMaskDrawable = styleDrawableSlots.mask,
+                        iconBackDrawables = styleDrawableSlots.backs,
+                        iconUponDrawable = styleDrawableSlots.upon
                     )
                     val currentLang = com.kian.perficon.ui.AppSettings(context).language.value
 
@@ -465,7 +509,8 @@ class ApkGenerator(private val context: Context) {
                             expandedCalendarMappings,
                             expandedCalendarSlotIndices,
                             expandedClockMappings,
-                            expandedClockSlotIndices
+                            expandedClockSlotIndices,
+                            styleDrawableSlots
                         )
                     )
 
@@ -672,26 +717,39 @@ class ApkGenerator(private val context: Context) {
         calendars: List<IconMapping>,
         calendarSlotIndices: List<Int>,
         clocks: List<IconMapping>,
-        clockSlotIndices: List<Int>
+        clockSlotIndices: List<Int>,
+        styleDrawableSlots: StyleDrawableSlots
     ): String {
         val sb = StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n")
         sb.append("    <scale factor=\"${project.scaleFactor}\" />\n")
+        styleDrawableSlots.mask?.let { drawable ->
+            sb.append("    <iconmask img1=\"$drawable\" />\n")
+        }
+        if (styleDrawableSlots.backs.isNotEmpty()) {
+            val attributes = styleDrawableSlots.backs
+                .mapIndexed { index, drawable -> "img${index + 1}=\"$drawable\"" }
+                .joinToString(" ")
+            sb.append("    <iconback $attributes />\n")
+        }
+        styleDrawableSlots.upon?.let { drawable ->
+            sb.append("    <iconupon img1=\"$drawable\" />\n")
+        }
 
         mappings.zip(slotIndices).forEach { (mapping, slotIndex) ->
             sb.append(
-                "    <item component=\"${componentName(mapping)}\" drawable=\"icon_$slotIndex\" />\n"
+                "    <item component=\"${componentName(mapping)}\" drawable=\"icon_$slotIndex\" name=\"${mapping.displayLabel()}\" />\n"
             )
         }
         calendars.zip(calendarSlotIndices).forEach { (mapping, slotIndex) ->
             val component = componentName(mapping)
-            sb.append("    <item component=\"$component\" drawable=\"calendar_${slotIndex}_1\" />\n")
+            sb.append("    <item component=\"$component\" drawable=\"calendar_${slotIndex}_1\" name=\"${mapping.displayLabel()}\" />\n")
             sb.append("    <calendar component=\"$component\" prefix=\"calendar_${slotIndex}_\" />\n")
         }
         val declaredClockDrawables = mutableSetOf<String>()
         clocks.zip(clockSlotIndices).forEach { (mapping, slotIndex) ->
             val component = componentName(mapping)
             val drawable = "clock_dynamic_$slotIndex"
-            sb.append("    <item component=\"$component\" drawable=\"$drawable\" />\n")
+            sb.append("    <item component=\"$component\" drawable=\"$drawable\" name=\"${mapping.displayLabel()}\" />\n")
             if (declaredClockDrawables.add(drawable)) {
                 sb.append(
                     "    <dynamic-clock drawable=\"$drawable\" defaultHour=\"10\" defaultMinute=\"10\" " +
@@ -709,6 +767,9 @@ class ApkGenerator(private val context: Context) {
         }.let { if (it.startsWith(".")) mapping.targetPackageName + it else it }
         return "ComponentInfo{${mapping.targetPackageName}/$activity}"
     }
+
+    private fun IconMapping.displayLabel(): String =
+        targetPackageName.substringAfterLast(".").ifBlank { targetPackageName }
 }
 
 private class CountingOutputStream(private val out: OutputStream) : OutputStream() {

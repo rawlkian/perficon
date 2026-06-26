@@ -48,6 +48,9 @@ data class IconMappingInfo(
     val packageName: String
 )
 
+private fun packageTail(packageName: String): String =
+    packageName.substringAfterLast(".").ifBlank { packageName }
+
 data class UnifiedIcon(
     val id: String,
     val drawableName: String,
@@ -228,7 +231,7 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
             },
             title = {
                 Text(
-                    text = icon.iconName,
+                    text = icon.mappings.firstOrNull()?.packageName?.let(::packageTail) ?: icon.iconName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -268,6 +271,7 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
 
 @Composable
 private fun IconCell(entry: UnifiedIcon, bitmap: ImageBitmap?, onClick: () -> Unit) {
+    val displayName = entry.mappings.firstOrNull()?.packageName?.let(::packageTail) ?: entry.iconName
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -309,7 +313,7 @@ private fun IconCell(entry: UnifiedIcon, bitmap: ImageBitmap?, onClick: () -> Un
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = entry.iconName,
+            text = displayName,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,

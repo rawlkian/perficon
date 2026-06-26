@@ -2,8 +2,12 @@ package com.kian.perficon.ui
 
 import android.content.Intent
 import android.app.DownloadManager
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.widget.Toast
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -92,6 +96,9 @@ private enum class ClockLayerAction {
 private fun defaultActivityName(packageName: String): String =
     packageName.trim().takeIf(String::isNotEmpty)?.let { "$it.MainActivity" }.orEmpty()
 
+private fun packageTail(packageName: String): String =
+    packageName.substringAfterLast(".").ifBlank { packageName }
+
 private fun hasPackageConflict(
     packageName: String,
     mappingType: Int,
@@ -127,8 +134,11 @@ fun ProjectEditorScreen(
     var searchMode by remember { mutableStateOf(0) } 
     var isSearchOverlayVisible by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
+    var showUncoveredOnly by remember { mutableStateOf(false) }
+    var installedApps by remember { mutableStateOf(emptyList<AppInfo>()) }
     var showStatsDialog by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var initialAddApp by remember { mutableStateOf<AppInfo?>(null) }
     var showProjectEditDialog by remember { mutableStateOf(false) }
     var showExportConfirmation by remember { mutableStateOf(false) }
     var showDynamicTypePicker by remember { mutableStateOf(false) }
@@ -165,6 +175,12 @@ fun ProjectEditorScreen(
         if (selectedTab == 1 && 1 !in visibleTabs) selectedTab = 0
     }
 
+    LaunchedEffect(Unit) {
+        installedApps = withContext(Dispatchers.IO) {
+            com.kian.perficon.util.getInstalledApps(context)
+        }
+    }
+
     val displayMappings = remember(mappings, selectedTab, isSearchActive, searchQuery, searchMode, dynamicCalendarEnabled, dynamicClockEnabled) {
         val type = when (selectedTab) {
             1 -> buildList {
@@ -178,19 +194,18 @@ fun ProjectEditorScreen(
             }
         }
         val baseList = mappings.filter { it.mappingType in type }
-        val distinctList = if (selectedTab == 0) {
-            baseList.groupBy { it.targetPackageName }
-                .values
-                .map { alternatives -> alternatives.firstOrNull { it.mappingType == 0 } ?: alternatives.first() }
-        } else baseList
         
-        if (!isSearchActive || searchQuery.isEmpty()) distinctList
+        if (!isSearchActive || searchQuery.isEmpty()) baseList
         else {
-            distinctList.filter { 
+            baseList.filter { 
                 val target = if (searchMode == 0) it.targetPackageName else it.displayName()
                 target.contains(searchQuery, ignoreCase = true)
             }
         }
+    }
+    val uncoveredApps = remember(installedApps, mappings) {
+        val covered = mappings.map { it.targetPackageName }.toSet()
+        installedApps.filter { it.packageName !in covered }
     }
 
     var mappingToEditPkg by remember { mutableStateOf<IconMapping?>(null) }
@@ -284,10 +299,19 @@ fun ProjectEditorScreen(
 
     Scaffold(
         topBar = {
-            if (isSearchActive && !isSearchOverlayVisible) {
+            if ((isSearchActive && !isSearchOverlayVisible) || showUncoveredOnly) {
                 CenterAlignedTopAppBar(
-                    title = { Text("搜索结果") },
-                    navigationIcon = { RetroIconButton(onClick = { isSearchActive = false; searchQuery = "" }, modifier = Modifier.padding(start = 8.dp)) { Icon(Icons.Default.ArrowBack, null) } }
+                    title = { Text(if (showUncoveredOnly) "未适配应用" else "搜索结果") },
+                    navigationIcon = {
+                        RetroIconButton(
+                            onClick = {
+                                isSearchActive = false
+                                searchQuery = ""
+                                showUncoveredOnly = false
+                            },
+                            modifier = Modifier.padding(start = 8.dp)
+                        ) { Icon(Icons.Default.ArrowBack, null) }
+                    }
                 )
             } else {
                 CenterAlignedTopAppBar(
@@ -304,7 +328,14 @@ fun ProjectEditorScreen(
         },
         floatingActionButton = {
             Box {
-                if (isSearchActive) {
+                if (showUncoveredOnly) {
+                    RetroFAB(
+                        onClick = { showUncoveredOnly = false },
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 16.dp, end = 16.dp)
+                    ) { Icon(Icons.Default.Close, null) }
+                } else if (isSearchActive) {
                     RetroFAB(
                         onClick = { isSearchActive = false; searchQuery = "" },
                         containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -312,7 +343,15 @@ fun ProjectEditorScreen(
                         modifier = Modifier.padding(bottom = 16.dp, end = 16.dp)
                     ) { Icon(Icons.Default.Close, null) }
                 } else if (selectedTab == 0) {
-                    FabMenu({ showAddDialog = true }, { isSearchOverlayVisible = true }, { showStatsDialog = true })
+                    FabMenu(
+                        onAdd = {
+                            initialAddApp = null
+                            showAddDialog = true
+                        },
+                        onSearch = { isSearchOverlayVisible = true },
+                        onStats = { showStatsDialog = true },
+                        onUncovered = { showUncoveredOnly = true }
+                    )
                 } else if (selectedTab == 1) {
                     FabMenu(
                         onAdd = { showDynamicTypePicker = true },
@@ -343,8 +382,17 @@ fun ProjectEditorScreen(
             }
 
             when (selectedTab) {
-                0 -> MappingGridWithScrollbar(displayMappings, { mappingToEditPkg = it }, { mappingToChangeIcon = it }, { mappingToDuplicate = it }, { viewModel.deleteMapping(it) }, { mappingToChangeIcon = it }, false) { mapping ->
-                    project?.let { viewModel.updateProject(it.copy(projectIconPath = mapping.iconPath)) }
+                0 -> {
+                    if (showUncoveredOnly) {
+                        UncoveredAppsGrid(uncoveredApps) { app ->
+                            initialAddApp = app
+                            showAddDialog = true
+                        }
+                    } else {
+                        MappingGridWithScrollbar(displayMappings, { mappingToEditPkg = it }, { mappingToChangeIcon = it }, { mappingToDuplicate = it }, { viewModel.deleteMapping(it) }, { mappingToChangeIcon = it }, false) { mapping ->
+                            project?.let { viewModel.updateProject(it.copy(projectIconPath = mapping.iconPath)) }
+                        }
+                    }
                 }
                 1 -> DynamicTabContent(
                     mappings = displayMappings,
@@ -471,16 +519,19 @@ fun ProjectEditorScreen(
         if (showAddDialog) {
             AddIconDialog(
                 existingMappings = mappings,
+                initialApp = initialAddApp,
                 onDismiss = { showAddDialog = false },
                 onAddFromGallery = { input ->
                     pendingNewIcon = input
                     addIconLauncher.launch("image/*")
                     showAddDialog = false
+                    initialAddApp = null
                 },
                 onAddFromFile = { input ->
                     pendingNewIcon = input
                     addIconLauncher.launch("*/*")
                     showAddDialog = false
+                    initialAddApp = null
                 },
                 onAddViaGenerator = { input ->
                     onNavigateToGenerator(
@@ -491,6 +542,7 @@ fun ProjectEditorScreen(
                         0L
                     )
                     showAddDialog = false
+                    initialAddApp = null
                 }
             )
         }
@@ -930,20 +982,20 @@ fun ChangeIconDialog(onDismiss: () -> Unit, onFromFile: () -> Unit, onFromGaller
 @Composable
 private fun AddIconDialog(
     existingMappings: List<IconMapping>,
+    initialApp: AppInfo?,
     onDismiss: () -> Unit,
     onAddFromGallery: (NewIconInput) -> Unit,
     onAddFromFile: (NewIconInput) -> Unit,
     onAddViaGenerator: (NewIconInput) -> Unit
 ) {
-    var iconName by remember { mutableStateOf("") }
-    var packageName by remember { mutableStateOf("") }
-    var activityName by remember { mutableStateOf("") }
+    var packageName by remember(initialApp) { mutableStateOf(initialApp?.packageName.orEmpty()) }
+    var activityName by remember(initialApp) { mutableStateOf(initialApp?.activityName.orEmpty()) }
     var showAppPicker by remember { mutableStateOf(false) }
     val packageDuplicate = remember(packageName, existingMappings) {
         hasPackageConflict(packageName, 0, existingMappings)
     }
     val input = NewIconInput(
-        iconName.trim(),
+        "",
         packageName.trim(),
         activityName.trim().ifBlank { defaultActivityName(packageName) }
     )
@@ -954,13 +1006,6 @@ private fun AddIconDialog(
             Text("添加图标", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(
-                    iconName,
-                    { iconName = it },
-                    label = { Text("图标名称") },
-                    isError = iconName.isBlank(),
-                    modifier = Modifier.fillMaxWidth()
-                )
                 OutlinedTextField(
                     packageName,
                     { packageName = it },
@@ -982,10 +1027,10 @@ private fun AddIconDialog(
                     Text("从已安装应用填入包名")
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RetroOutlinedButton({ onAddFromGallery(input) }, Modifier.weight(1f), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("图库") }
-                    RetroOutlinedButton({ onAddFromFile(input) }, Modifier.weight(1f), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("文件") }
+                    RetroOutlinedButton({ onAddFromGallery(input) }, Modifier.weight(1f), enabled = packageName.isNotBlank() && !packageDuplicate) { Text("图库") }
+                    RetroOutlinedButton({ onAddFromFile(input) }, Modifier.weight(1f), enabled = packageName.isNotBlank() && !packageDuplicate) { Text("文件") }
                 }
-                RetroButton({ onAddViaGenerator(input) }, Modifier.fillMaxWidth(), enabled = iconName.isNotBlank() && packageName.isNotBlank() && !packageDuplicate) { Text("快速生成") }
+                RetroButton({ onAddViaGenerator(input) }, Modifier.fillMaxWidth(), enabled = packageName.isNotBlank() && !packageDuplicate) { Text("快速生成") }
             }
             Spacer(modifier = Modifier.height(24.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1087,7 +1132,6 @@ fun DuplicateMappingDialog(mapping: IconMapping, existingMappings: List<IconMapp
 
 @Composable
 fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMappings: List<IconMapping>, onDismiss: () -> Unit, onConfirm: (IconMapping) -> Unit) {
-    var iconName by remember { mutableStateOf(mapping.iconName) }
     var pkg by remember { mutableStateOf(mapping.targetPackageName) }
     var activity by remember { mutableStateOf(mapping.targetActivityName) }
     val isDup = remember(pkg, existingMappings) {
@@ -1100,7 +1144,6 @@ fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMa
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(iconName, { iconName = it }, label = { Text("图标名称") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(pkg, { pkg = it }, label = { Text("包名") }, isError = isDup, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
                     activity,
@@ -1115,7 +1158,7 @@ fun EditMappingDialog(title: String = "编辑", mapping: IconMapping, existingMa
                 RetroOutlinedButton(onClick = onDismiss) { Text("取消") }
                 Spacer(modifier = Modifier.width(8.dp))
                 RetroButton(
-                    onClick = { onConfirm(mapping.copy(iconName = iconName.trim(), targetPackageName = pkg.trim(), targetActivityName = activity.trim().ifBlank { defaultActivityName(pkg) })) },
+                    onClick = { onConfirm(mapping.copy(iconName = "", targetPackageName = pkg.trim(), targetActivityName = activity.trim().ifBlank { defaultActivityName(pkg) })) },
                     enabled = pkg.isNotBlank() && !isDup
                 ) { Text("确认") }
             }
@@ -1779,6 +1822,89 @@ fun MappingGridWithScrollbar(mappings: List<IconMapping>, onEdit: (IconMapping) 
     }
 }
 
+private fun saveImageToPictures(context: android.content.Context, path: String): Boolean {
+    val source = File(path).takeIf(File::isFile) ?: return false
+    val resolver = context.contentResolver
+    val displayName = source.nameWithoutExtension.ifBlank { "perficon_asset" } + "_${System.currentTimeMillis()}.png"
+    val values = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Perficon")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+    }
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+    return try {
+        resolver.openOutputStream(uri)?.use { output ->
+            source.inputStream().use { input -> input.copyTo(output) }
+        } ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        }
+        true
+    } catch (e: Exception) {
+        runCatching { resolver.delete(uri, null, null) }
+        false
+    }
+}
+
+@Composable
+fun UncoveredAppsGrid(apps: List<AppInfo>, onPick: (AppInfo) -> Unit) {
+    if (apps.isEmpty()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(16.dp))
+            Text("已适配全部已安装应用", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        }
+        return
+    }
+
+    val state = rememberLazyGridState()
+    Box(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            state = state,
+            columns = GridCells.Fixed(5),
+            contentPadding = PaddingValues(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(apps, key = { it.packageName }) { app ->
+                Column(
+                    Modifier
+                        .aspectRatio(0.7f)
+                        .clickable { onPick(app) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Image(app.icon.toBitmap().asImageBitmap(), null, Modifier.size(44.dp).clip(MaterialTheme.shapes.small))
+                    Text(
+                        packageTail(app.packageName),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+        VerticalScrollbar(state, Modifier.align(Alignment.CenterEnd).padding(2.dp))
+    }
+}
+
 @Composable
 fun MappingItemView(mapping: IconMapping, onEdit: (IconMapping) -> Unit, onChangeIcon: (IconMapping) -> Unit, onDuplicate: (IconMapping) -> Unit, onDelete: (IconMapping) -> Unit, onEditDynamic: (IconMapping) -> Unit, onSetProjectIcon: (IconMapping) -> Unit, enableDynamicActions: Boolean = true) {
     var showMenu by remember { mutableStateOf(false) }
@@ -1802,7 +1928,7 @@ fun MappingItemView(mapping: IconMapping, onEdit: (IconMapping) -> Unit, onChang
 }
 
 private fun IconMapping.displayName(): String =
-    iconName.ifBlank { targetPackageName.substringAfterLast(".") }
+    iconName.ifBlank { packageTail(targetPackageName) }
 
 @Composable
 fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, onS: () -> Unit, onD: () -> Unit) {
@@ -1832,12 +1958,15 @@ fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, 
 }
 
 @Composable
-fun FabMenu(onAdd: () -> Unit, onSearch: () -> Unit, onStats: () -> Unit, showAdd: Boolean = true) {
+fun FabMenu(onAdd: () -> Unit, onSearch: () -> Unit, onStats: () -> Unit, showAdd: Boolean = true, onUncovered: (() -> Unit)? = null) {
     var ex by remember { mutableStateOf(false) }
     Column(horizontalAlignment = Alignment.End) {
         if (ex) {
             RetroSmallFAB({ ex = false; onStats() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.PieChart, null) }
             RetroSmallFAB({ ex = false; onSearch() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Search, null) }
+            if (onUncovered != null) {
+                RetroSmallFAB({ ex = false; onUncovered() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Apps, null) }
+            }
             if (showAdd) {
                 RetroSmallFAB({ ex = false; onAdd() }, Modifier.padding(bottom = 8.dp)) { Icon(Icons.Default.Add, null) }
             }
@@ -1925,7 +2054,11 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
             path = project.iconMaskPath,
             onPickFromGallery = { currentPickingType = "mask"; stylePickerLauncher.launch("image/*") },
             onPickFromFile = { currentPickingType = "mask"; stylePickerLauncher.launch("*/*") },
-            onRemove = { onUpdate(project.copy(iconMaskPath = null)) }
+            onRemove = { onUpdate(project.copy(iconMaskPath = null)) },
+            onDownload = { path ->
+                val ok = saveImageToPictures(context, path)
+                Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+            }
         )
         IconSettingItem(
             title = "叠层",
@@ -1933,7 +2066,11 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
             path = project.iconUponPath,
             onPickFromGallery = { currentPickingType = "upon"; stylePickerLauncher.launch("image/*") },
             onPickFromFile = { currentPickingType = "upon"; stylePickerLauncher.launch("*/*") },
-            onRemove = { onUpdate(project.copy(iconUponPath = null)) }
+            onRemove = { onUpdate(project.copy(iconUponPath = null)) },
+            onDownload = { path ->
+                val ok = saveImageToPictures(context, path)
+                Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+            }
         )
         
         Text("背景", style = MaterialTheme.typography.titleMedium)
@@ -1947,6 +2084,10 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
                 onRemove = { 
                     val remaining = project.iconBackPaths.split(",").filter { it != path && it.isNotEmpty() }
                     onUpdate(project.copy(iconBackPaths = if(remaining.isEmpty()) null else remaining.joinToString(",")))
+                },
+                onDownload = { assetPath ->
+                    val ok = saveImageToPictures(context, assetPath)
+                    Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -1969,7 +2110,8 @@ fun IconSettingItem(
     path: String?,
     onPickFromGallery: () -> Unit,
     onPickFromFile: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onDownload: (String) -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
     Card(
@@ -1983,19 +2125,10 @@ fun IconSettingItem(
                 Text(desc, style = MaterialTheme.typography.bodySmall)
             }
             if (path != null) {
-                Box {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AsyncImage(model = File(path), null, Modifier.size(56.dp).clip(MaterialTheme.shapes.medium), contentScale = ContentScale.Crop)
-                    Surface(
-                        onClick = onRemove,
-                        modifier = Modifier.align(Alignment.TopEnd).size(28.dp),
-                        shape = MaterialTheme.shapes.small,
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Close, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
-                        }
-                    }
+                    RetroIconButton(onClick = { onDownload(path) }) { Icon(Icons.Default.Download, "下载") }
+                    RetroIconButton(onClick = onRemove) { Icon(Icons.Default.Close, "移除", tint = MaterialTheme.colorScheme.error) }
                 }
             } else {
                 Box {
