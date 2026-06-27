@@ -63,6 +63,7 @@ import com.kian.perficon.viewmodel.IconPackViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.io.File
 
 private data class NewIconInput(
@@ -155,6 +156,7 @@ fun ProjectEditorScreen(
     var calendarMappingToEdit by remember { mutableStateOf<IconMapping?>(null) }
     var clockMappingToEdit by remember { mutableStateOf<IconMapping?>(null) }
     var exportProgress by remember { mutableStateOf<ApkGenerator.Progress?>(null) }
+    var isExporting by remember { mutableStateOf(false) }
     var completedApk by remember { mutableStateOf<File?>(null) }
     var buildError by remember { mutableStateOf<String?>(null) }
     var buildErrorDetails by remember { mutableStateOf<String?>(null) }
@@ -268,10 +270,13 @@ fun ProjectEditorScreen(
     }
 
     fun buildAndShareApk() {
+        if (isExporting) return
+        val p = project ?: return
+        isExporting = true
+        exportProgress = ApkGenerator.Progress(0, "正在启动构建")
         scope.launch {
-            val p = project ?: return@launch
-            exportProgress = ApkGenerator.Progress(0, "正在启动构建")
             try {
+                yield()
                 val safeFileName = p.name.replace("[^\\p{L}\\p{N}]".toRegex(), "_") + ".apk"
                 val apkFile = withContext(Dispatchers.IO) {
                     val generated = ApkGenerator(context).generateApk(p, mappings) { progress ->
@@ -293,6 +298,7 @@ fun ProjectEditorScreen(
                 }
             } finally {
                 exportProgress = null
+                isExporting = false
             }
         }
     }
@@ -320,7 +326,10 @@ fun ProjectEditorScreen(
                     actions = {
                         RetroIconButton(onClick = { showProjectEditDialog = true }) { Icon(Icons.Default.Edit, localize("编辑项目", LocalAppLanguage.current)) }
                         Spacer(modifier = Modifier.width(8.dp))
-                        RetroIconButton(onClick = { showExportConfirmation = true }) { Icon(Icons.Default.Build, localize("导出", LocalAppLanguage.current)) }
+                        RetroIconButton(
+                            onClick = { showExportConfirmation = true },
+                            enabled = !isExporting
+                        ) { Icon(Icons.Default.Build, localize("导出", LocalAppLanguage.current)) }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                 )
@@ -494,7 +503,7 @@ fun ProjectEditorScreen(
 
         if (showExportConfirmation) {
             RetroDialog(
-                onDismissRequest = { showExportConfirmation = false }
+                onDismissRequest = { if (!isExporting) showExportConfirmation = false }
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text("确认导出", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -505,12 +514,18 @@ fun ProjectEditorScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        RetroOutlinedButton(onClick = { showExportConfirmation = false }) { Text("取消") }
+                        RetroOutlinedButton(
+                            onClick = { showExportConfirmation = false },
+                            enabled = !isExporting
+                        ) { Text("取消") }
                         Spacer(modifier = Modifier.width(8.dp))
-                        RetroButton(onClick = {
-                            showExportConfirmation = false
-                            buildAndShareApk()
-                        }) { Text("开始导出") }
+                        RetroButton(
+                            onClick = {
+                                showExportConfirmation = false
+                                buildAndShareApk()
+                            },
+                            enabled = !isExporting
+                        ) { Text("开始导出") }
                     }
                 }
             }
@@ -1978,6 +1993,13 @@ fun FabMenu(onAdd: () -> Unit, onSearch: () -> Unit, onStats: () -> Unit, showAd
 @Composable
 fun StatsDialog(mappings: List<IconMapping>, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val actualIconCount = remember(mappings) {
+        mappings
+            .map { it.iconPath }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .size
+    }
     var installedCount by remember { mutableIntStateOf(0) }
     var coveredCount by remember { mutableIntStateOf(0) }
     LaunchedEffect(mappings) {
@@ -1991,7 +2013,8 @@ fun StatsDialog(mappings: List<IconMapping>, onDismiss: () -> Unit) {
             Text("统计信息", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatRow("图标总数", mappings.size.toString())
+                StatRow("映射总数", mappings.size.toString())
+                StatRow("实际图标数量", actualIconCount.toString())
                 StatRow("已安装应用", installedCount.toString())
                 StatRow("已覆盖", coveredCount.toString())
                 StatRow("未覆盖", (installedCount - coveredCount).toString())

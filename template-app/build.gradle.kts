@@ -49,13 +49,7 @@ abstract class GeneratePlaceholdersTask : DefaultTask() {
             output.toByteArray()
         }
 
-        // 30000 static icon slots
-        val totalStaticSlots = 30000
-        for (i in 1..totalStaticSlots) {
-            val f = outDir.resolve("icon_$i.png")
-            f.parentFile.mkdirs()
-            if (!f.exists()) f.writeBytes(placeholderBytes)
-        }
+        val totalStaticSlots = 60000
 
         // 64×31 dynamic calendar slots
         val totalCalendarSlots = 64
@@ -178,6 +172,9 @@ android {
 }
 
 dependencies {
+    implementation(project(":template-icons-1"))
+    implementation(project(":template-icons-2"))
+    implementation(project(":template-icons-3"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

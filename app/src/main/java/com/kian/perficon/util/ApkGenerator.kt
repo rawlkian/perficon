@@ -23,6 +23,12 @@ class ApkGenerator(private val context: Context) {
         // detected at build time via findTemplateSlots / findCalendarTemplateSlots / findClockTemplateSlots.
         const val DYNAMIC_CALENDAR_SLOT_COUNT = 64
         const val DYNAMIC_CLOCK_SLOT_COUNT = 64
+        val SAFE_NAME_PATTERN = Regex("[^\\p{L}\\p{N}]")
+        val STATIC_SLOT_PATTERN = Regex("^res/drawable[^/]*/icon_(\\d+)\\.png$")
+        val CALENDAR_SLOT_PATTERN = Regex("^(.*/)calendar_(\\d+)_(\\d+)\\.png$")
+        val CLOCK_SLOT_PATTERN = Regex("^(.*/)clock_(\\d+)_(bg|hour|minute|second)\\.png$")
+        val CLOCK_XML_PATTERN = Regex("^res/drawable[^/]*/clock_dynamic_(\\d+)\\.xml$")
+        val LAUNCHER_ICON_PATTERN = Regex("^res/mipmap[^/]*/ic_launcher(_round)?\\.(png|webp)$")
     }
 
     class GenerationException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -64,7 +70,7 @@ class ApkGenerator(private val context: Context) {
         fun trans(key: String): String = localize(key, appLanguage)
 
         val outputDir = StorageHelper.outputsDir
-        val safeName = project.name.replace("[^\\p{L}\\p{N}]".toRegex(), "_")
+        val safeName = project.name.replace(SAFE_NAME_PATTERN, "_")
         val outputApk = File(outputDir, "$safeName.apk")
 
         val projectRoot = StorageHelper.getProjectDir(project.id)
@@ -146,11 +152,12 @@ class ApkGenerator(private val context: Context) {
             val countingOut = CountingOutputStream(FileOutputStream(unsignedApk))
             ZipOutputStream(countingOut).use { zos ->
                 ZipFile(baseApk).use { zip ->
-                    onProgress(Progress(3, trans("正在写入图标与映射")))
+                    onProgress(Progress(3, trans("正在扫描模板资源")))
                     val slotsResult = findAllTemplateSlots(zip)
                     val slots = slotsResult.staticSlots
                     val calendarSlots = slotsResult.calendarSlots
                     val clockSlots = slotsResult.clockSlots
+                    onProgress(Progress(3, trans("正在写入图标与映射")))
 
                     // Group static mappings by their iconPath to deduplicate slot usage.
                     // This allows multiple launcher activity mappings (like MT Manager)
@@ -415,12 +422,18 @@ class ApkGenerator(private val context: Context) {
                     }
 
                     val activeClockSlots = resolvedClockSlotIndices.toSet()
-                    val staticSlotPattern = Regex("^res/drawable[^/]*/icon_(\\d+)\\.png$")
-                    val calendarPattern = Regex("^(.*/)calendar_(\\d+)_(\\d+)\\.png$")
-                    val clockPattern = Regex("^(.*/)clock_(\\d+)_(bg|hour|minute|second)\\.png$")
-                    val clockXmlPattern = Regex("^res/drawable[^/]*/clock_dynamic_(\\d+)\\.xml$")
-
+                    val replacementEntryNames = replacements.keys
+                    val dynamicReplacementEntryNames = dynamicReplacements.keys
+                    val totalEntries = zip.size().coerceAtLeast(1)
+                    var processedEntries = 0
+                    var lastProgressAt = 0L
                     zip.entries().asSequence().forEach { entry ->
+                        processedEntries++
+                        val now = System.currentTimeMillis()
+                        if (processedEntries == 1 || processedEntries == totalEntries || (processedEntries % 1000 == 0 && now - lastProgressAt > 500L)) {
+                            lastProgressAt = now
+                            onProgress(Progress(3, "${trans("正在处理模板资源")} $processedEntries/$totalEntries"))
+                        }
                         if (
                             shouldDiscardSignature(entry.name) ||
                             entry.name == "assets/appfilter.xml" ||
@@ -430,21 +443,21 @@ class ApkGenerator(private val context: Context) {
                         }
 
                         // Size Slimming: Discard unused static/calendar/clock drawables and XML files
-                        val isStaticSlot = staticSlotPattern.matches(entry.name)
-                        val isCalendarSlot = calendarPattern.matches(entry.name)
-                        val isClockSlot = clockPattern.matches(entry.name)
+                        val isStaticSlot = STATIC_SLOT_PATTERN.matches(entry.name)
+                        val isCalendarSlot = CALENDAR_SLOT_PATTERN.matches(entry.name)
+                        val isClockSlot = CLOCK_SLOT_PATTERN.matches(entry.name)
 
-                        if (isStaticSlot && entry.name !in replacements) {
+                        if (isStaticSlot && entry.name !in replacementEntryNames) {
                             return@forEach
                         }
-                        if (isCalendarSlot && entry.name !in dynamicReplacements) {
+                        if (isCalendarSlot && entry.name !in dynamicReplacementEntryNames) {
                             return@forEach
                         }
-                        if (isClockSlot && entry.name !in dynamicReplacements) {
+                        if (isClockSlot && entry.name !in dynamicReplacementEntryNames) {
                             return@forEach
                         }
 
-                        val clockXmlMatch = clockXmlPattern.matchEntire(entry.name)
+                        val clockXmlMatch = CLOCK_XML_PATTERN.matchEntire(entry.name)
                         if (clockXmlMatch != null) {
                             val slotIndex = clockXmlMatch.groupValues[1].toInt()
                             if (slotIndex !in activeClockSlots) {
@@ -455,7 +468,7 @@ class ApkGenerator(private val context: Context) {
                         val replacement = replacements[entry.name]
                             ?: dynamicReplacements[entry.name]
                             ?: projectIcon?.takeIf {
-                            entry.name.matches(Regex("^res/mipmap[^/]*/ic_launcher(_round)?\\.(png|webp)$"))
+                            LAUNCHER_ICON_PATTERN.matches(entry.name)
                         }
                         val resourceReplacement = resourceReplacements[entry.name]
                         val outputEntry = ZipEntry(entry.name)
@@ -557,10 +570,6 @@ class ApkGenerator(private val context: Context) {
     )
 
     private fun findAllTemplateSlots(zip: ZipFile): TemplateSlotsResult {
-        val staticSlotPattern = Regex("^res/drawable[^/]*/icon_(\\d+)\\.png$")
-        val calendarPattern = Regex("^(.*/)calendar_(\\d+)_(\\d+)\\.png$")
-        val clockPattern = Regex("^(.*/)clock_(\\d+)_(bg|hour|minute|second)\\.png$")
-
         val staticSlots = mutableListOf<TemplateSlot>()
         val calendarDayMap = mutableMapOf<Int, MutableSet<Int>>()
         val clockLayerMap = mutableMapOf<Int, MutableSet<String>>()
@@ -569,11 +578,11 @@ class ApkGenerator(private val context: Context) {
 
         zip.entries().asSequence().forEach { entry ->
             val name = entry.name
-            staticSlotPattern.matchEntire(name)?.let { match ->
+            STATIC_SLOT_PATTERN.matchEntire(name)?.let { match ->
                 staticSlots += TemplateSlot(match.groupValues[1].toInt(), name)
                 return@forEach
             }
-            calendarPattern.matchEntire(name)?.let { match ->
+            CALENDAR_SLOT_PATTERN.matchEntire(name)?.let { match ->
                 val dir = match.groupValues[1]
                 val slot = match.groupValues[2].toInt()
                 val day = match.groupValues[3].toInt()
@@ -583,7 +592,7 @@ class ApkGenerator(private val context: Context) {
                 }
                 return@forEach
             }
-            clockPattern.matchEntire(name)?.let { match ->
+            CLOCK_SLOT_PATTERN.matchEntire(name)?.let { match ->
                 val dir = match.groupValues[1]
                 val slot = match.groupValues[2].toInt()
                 val layer = match.groupValues[3]

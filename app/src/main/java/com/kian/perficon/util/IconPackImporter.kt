@@ -24,9 +24,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.ensureActive
 import org.xmlpull.v1.XmlPullParser
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONObject
 
 class IconPackImporter(
@@ -65,6 +68,11 @@ class IconPackImporter(
         var uponImg: String? = null
         val backImgs = mutableSetOf<String>()
         var scaleFactor: Float? = null
+    }
+
+    private class ContentDeduper {
+        val hashToPath = ConcurrentHashMap<String, String>()
+        val lock = Mutex()
     }
 
     fun getInstalledIconPacks(): List<IconPackInfo> {
@@ -150,6 +158,7 @@ class IconPackImporter(
             }
             val projectIconsDir = StorageHelper.getProjectIconsDir(projectId)
             var currentProject = repository.getProjectById(projectId) ?: return@withContext false
+            val contentDeduper = ContentDeduper()
 
             val totalItems = allIconsMap.size + clockMappings.size
             progressFlow.value = ImportProgress(
@@ -198,7 +207,8 @@ class IconPackImporter(
                                         sourcePackageName,
                                         "${drawableName}$day",
                                         "calendar_${drawableName}_$day",
-                                        projectIconsDir
+                                        projectIconsDir,
+                                        contentDeduper
                                     )
                                 }
                                 if (frames.size == DynamicIconAssets.CALENDAR_DAY_COUNT) {
@@ -213,7 +223,7 @@ class IconPackImporter(
                                     ))
                                 }
                             } else if (drawableName in dynamicClockDrawables) {
-                                val layers = extractClockLayers(remoteContext, sourcePackageName, drawableName, projectIconsDir)
+                                val layers = extractClockLayers(remoteContext, sourcePackageName, drawableName, projectIconsDir, contentDeduper)
                                 if (layers != null) {
                                     mappingsToInsert.add(IconMapping(
                                         projectId = projectId,
@@ -226,7 +236,7 @@ class IconPackImporter(
                                     ))
                                 }
                             } else {
-                                val iconPath = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, drawableName, "icon_${drawableName}", projectIconsDir)
+                                val iconPath = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, drawableName, "icon_${drawableName}", projectIconsDir, contentDeduper)
                                 if (iconPath != null) {
                                     mappingsToInsert.add(IconMapping(
                                         projectId = projectId,
@@ -249,20 +259,20 @@ class IconPackImporter(
                         semaphore.withPermit {
                             coroutineContext.ensureActive()
                             val (pkg, face, hands) = triple
-                            val facePath = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, face, "clock_face_${face}", projectIconsDir)
+                            val facePath = extractDrawableToPrivateStorage(remoteContext, sourcePackageName, face, "clock_face_${face}", projectIconsDir, contentDeduper)
                             if (facePath != null) {
                                 val hourDrawable = hands.optString("hour")
                                 val minuteDrawable = hands.optString("minute")
                                 val secondDrawable = hands.optString("second")
                                 
                                 val hourPath = if (hourDrawable.isNotBlank()) {
-                                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, hourDrawable, "clock_hand_${hourDrawable}", projectIconsDir)
+                                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, hourDrawable, "clock_hand_${hourDrawable}", projectIconsDir, contentDeduper)
                                 } else null
                                 val minutePath = if (minuteDrawable.isNotBlank()) {
-                                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, minuteDrawable, "clock_hand_${minuteDrawable}", projectIconsDir)
+                                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, minuteDrawable, "clock_hand_${minuteDrawable}", projectIconsDir, contentDeduper)
                                 } else null
                                 val secondPath = if (secondDrawable.isNotBlank()) {
-                                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, secondDrawable, "clock_hand_${secondDrawable}", projectIconsDir)
+                                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, secondDrawable, "clock_hand_${secondDrawable}", projectIconsDir, contentDeduper)
                                 } else null
                                 
                                 val layers = DynamicIconAssets.ClockLayers(
@@ -296,17 +306,17 @@ class IconPackImporter(
 
             // Global Styles
             globalConfig.maskImg?.let { name ->
-                extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, "mask", projectIconsDir)?.let {
+                extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, "mask", projectIconsDir, contentDeduper)?.let {
                     currentProject = currentProject.copy(iconMaskPath = it)
                 }
             }
             globalConfig.uponImg?.let { name ->
-                extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, "upon", projectIconsDir)?.let {
+                extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, "upon", projectIconsDir, contentDeduper)?.let {
                     currentProject = currentProject.copy(iconUponPath = it)
                 }
             }
             if (globalConfig.backImgs.isNotEmpty()) {
-                val paths = globalConfig.backImgs.mapNotNull { extractDrawableToPrivateStorage(remoteContext, sourcePackageName, it, "back_${it}", projectIconsDir) }
+                val paths = globalConfig.backImgs.mapNotNull { extractDrawableToPrivateStorage(remoteContext, sourcePackageName, it, "back_${it}", projectIconsDir, contentDeduper) }
                 if (paths.isNotEmpty()) currentProject = currentProject.copy(iconBackPaths = paths.joinToString(","))
             }
             globalConfig.scaleFactor?.let { currentProject = currentProject.copy(scaleFactor = it) }
@@ -411,14 +421,15 @@ class IconPackImporter(
         remoteContext: Context,
         remotePkg: String,
         drawableName: String,
-        outputDir: File
+        outputDir: File,
+        contentDeduper: ContentDeduper
     ): DynamicIconAssets.ClockLayers? {
         val slot = Regex("clock_dynamic_(\\d+)").find(drawableName)?.groupValues?.getOrNull(1)
-        val face = extractDrawableToPrivateStorage(remoteContext, remotePkg, drawableName, "clock_face_${drawableName}", outputDir)
-        val background = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_bg", "clock_bg_${drawableName}", outputDir) } ?: face
-        val hour = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_hour", "clock_hour_${drawableName}", outputDir) } ?: background
-        val minute = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_minute", "clock_minute_${drawableName}", outputDir) } ?: hour
-        val second = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_second", "clock_second_${drawableName}", outputDir) } ?: minute
+        val face = extractDrawableToPrivateStorage(remoteContext, remotePkg, drawableName, "clock_face_${drawableName}", outputDir, contentDeduper)
+        val background = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_bg", "clock_bg_${drawableName}", outputDir, contentDeduper) } ?: face
+        val hour = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_hour", "clock_hour_${drawableName}", outputDir, contentDeduper) } ?: background
+        val minute = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_minute", "clock_minute_${drawableName}", outputDir, contentDeduper) } ?: hour
+        val second = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_second", "clock_second_${drawableName}", outputDir, contentDeduper) } ?: minute
         return background?.let { DynamicIconAssets.ClockLayers(it, hour ?: it, minute ?: hour ?: it, second ?: minute ?: hour ?: it) }
     }
 
@@ -427,7 +438,8 @@ class IconPackImporter(
         remotePkg: String, 
         drawableName: String?, 
         fileName: String, 
-        outputDir: File
+        outputDir: File,
+        contentDeduper: ContentDeduper
     ): String? = withContext(Dispatchers.IO) {
         if (drawableName == null) return@withContext null
         
@@ -448,10 +460,9 @@ class IconPackImporter(
             if (resId != 0) {
                 try {
                     val bitmap = drawableToBitmap(res.getDrawable(resId, remoteContext.theme))
-                    FileOutputStream(targetFile).use { out -> 
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) 
-                    }
-                    return@withLock targetFile.absolutePath
+                    val savedPath = saveDeduplicatedBitmap(bitmap, targetFile, contentDeduper)
+                    bitmap.recycle()
+                    return@withLock savedPath
                 } catch (e: Exception) {}
             }
 
@@ -461,10 +472,9 @@ class IconPackImporter(
                     remoteContext.assets.openNonAssetFd(path).createInputStream().use { input ->
                         val bitmap = BitmapFactory.decodeStream(input)
                         if (bitmap != null) {
-                            FileOutputStream(targetFile).use { out -> 
-                                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) 
-                            }
-                            return@withLock targetFile.absolutePath
+                            val savedPath = saveDeduplicatedBitmap(bitmap, targetFile, contentDeduper)
+                            bitmap.recycle()
+                            return@withLock savedPath
                         }
                     }
                 } catch (e: Exception) {}
@@ -472,6 +482,33 @@ class IconPackImporter(
             null
         }
     }
+
+    private suspend fun saveDeduplicatedBitmap(
+        bitmap: Bitmap,
+        targetFile: File,
+        contentDeduper: ContentDeduper
+    ): String {
+        val pngBytes = ByteArrayOutputStream().use { output ->
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Unable to encode drawable." }
+            output.toByteArray()
+        }
+        val hash = sha256(pngBytes)
+        return contentDeduper.lock.withLock {
+            contentDeduper.hashToPath[hash]
+                ?.takeIf { File(it).isFile }
+                ?.let { return@withLock it }
+
+            targetFile.parentFile?.mkdirs()
+            FileOutputStream(targetFile).use { it.write(pngBytes) }
+            contentDeduper.hashToPath[hash] = targetFile.absolutePath
+            targetFile.absolutePath
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
 
     private fun drawableToBitmap(drawable: Drawable): Bitmap {
         val w = if (drawable.intrinsicWidth <= 10) 256 else drawable.intrinsicWidth

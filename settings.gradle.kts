@@ -25,3 +25,6 @@ dependencyResolutionManagement {
 rootProject.name = "Perficon"
 include(":app")
 include(":template-app")
+include(":template-icons-1")
+include(":template-icons-2")
+include(":template-icons-3")

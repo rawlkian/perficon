@@ -24,6 +24,8 @@ build/
 template-app/src/main/res/drawable-nodpi-v5/
 template-app/src/main/res/drawable/clock_dynamic_*.xml
 template-app/src/main/res/xml/drawable.xml
+template-icons-*/build/
+template-icons-*/src/main/res/drawable-nodpi-v5/
 
 # Local debugging artifacts.
 .kotlin/errors/

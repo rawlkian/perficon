@@ -140,7 +140,7 @@ Perficon 采用 **MVVM + Clean Architecture** 分层设计：
 
 | 资源类型 | 容量 | 说明 |
 |---------|------|------|
-| 静态图标槽位 | 30,000 | `res/drawable-nodpi-v5/icon_N.png` |
+| 静态图标槽位 | 60,000 | `res/drawable-nodpi-v5/icon_N.png` |
 | 动态日历槽位 | 64 组 | `calendar_N_M.png`（每组 31 天） |
 | 动态时钟槽位 | 64 组 | `clock_N_bg/hour/minute/second.png` + `clock_dynamic_N.xml` |
 

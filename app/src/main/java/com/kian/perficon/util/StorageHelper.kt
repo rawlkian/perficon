@@ -11,7 +11,10 @@ import java.io.File
 object StorageHelper {
 
     val rootDir: File
-        get() = File(Environment.getExternalStorageDirectory(), "Perficon")
+        get() = File(Environment.getExternalStorageDirectory(), "Perficon").apply {
+            if (!exists()) mkdirs()
+            ensureNoMediaFile(this)
+        }
 
     val projectsDir: File
         get() = File(rootDir, "Projects").apply { if (!exists()) mkdirs() }
@@ -41,6 +44,15 @@ object StorageHelper {
                 data = Uri.parse("package:${context.packageName}")
             }
             context.startActivity(intent)
+        }
+    }
+
+    private fun ensureNoMediaFile(dir: File) {
+        runCatching {
+            if (dir.isDirectory) {
+                val noMedia = File(dir, ".nomedia")
+                if (!noMedia.exists()) noMedia.createNewFile()
+            }
         }
     }
 }
