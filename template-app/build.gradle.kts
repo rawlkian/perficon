@@ -1,5 +1,6 @@
 import java.awt.Color
 import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 
 plugins {
@@ -43,12 +44,17 @@ abstract class GeneratePlaceholdersTask : DefaultTask() {
         g.color = Color(210, 210, 210)
         g.fillRect(0, 0, 192, 192)
         g.dispose()
+        val placeholderBytes = ByteArrayOutputStream().use { output ->
+            ImageIO.write(img, "PNG", output)
+            output.toByteArray()
+        }
 
         // 30000 static icon slots
         val totalStaticSlots = 30000
         for (i in 1..totalStaticSlots) {
             val f = outDir.resolve("icon_$i.png")
-            if (!f.exists()) ImageIO.write(img, "PNG", f)
+            f.parentFile.mkdirs()
+            if (!f.exists()) f.writeBytes(placeholderBytes)
         }
 
         // 64×31 dynamic calendar slots
@@ -56,7 +62,8 @@ abstract class GeneratePlaceholdersTask : DefaultTask() {
         for (slot in 1..totalCalendarSlots) {
             for (day in 1..31) {
                 val f = outDir.resolve("calendar_${slot}_$day.png")
-                if (!f.exists()) ImageIO.write(img, "PNG", f)
+                f.parentFile.mkdirs()
+                if (!f.exists()) f.writeBytes(placeholderBytes)
             }
         }
 
@@ -65,7 +72,8 @@ abstract class GeneratePlaceholdersTask : DefaultTask() {
         for (slot in 1..totalClockSlots) {
             for (layer in listOf("bg", "hour", "minute", "second")) {
                 val f = outDir.resolve("clock_${slot}_$layer.png")
-                if (!f.exists()) ImageIO.write(img, "PNG", f)
+                f.parentFile.mkdirs()
+                if (!f.exists()) f.writeBytes(placeholderBytes)
             }
             // Generate clock_dynamic_X.xml
             val clockXml = drawDir.resolve("clock_dynamic_$slot.xml")

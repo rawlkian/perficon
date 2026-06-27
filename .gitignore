@@ -16,5 +16,18 @@ local.properties
 *.apk
 *.aab
 app/build/
+template-app/build/
 build/
 .gradle/
+
+# Generated template placeholder resources.
+template-app/src/main/res/drawable-nodpi-v5/
+template-app/src/main/res/drawable/clock_dynamic_*.xml
+template-app/src/main/res/xml/drawable.xml
+
+# Local debugging artifacts.
+.kotlin/errors/
+logcat_output*.txt
+window_dump.xml
+perficon_database
+app/perficon_database

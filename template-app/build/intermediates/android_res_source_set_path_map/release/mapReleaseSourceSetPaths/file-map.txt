@@ -1,8 +1,0 @@
-com.kian.perficontemplate.template-app-pngs-0 D:\AndroidProject\Perficon\template-app\build\generated\res\pngs\release
-com.kian.perficontemplate.template-app-updated_navigation_xml-1 D:\AndroidProject\Perficon\template-app\build\generated\updated_navigation_xml\release
-com.kian.perficontemplate.template-app-packageReleaseResources-2 D:\AndroidProject\Perficon\template-app\build\intermediates\incremental\release\packageReleaseResources\merged.dir
-com.kian.perficontemplate.template-app-packageReleaseResources-3 D:\AndroidProject\Perficon\template-app\build\intermediates\incremental\release\packageReleaseResources\stripped.dir
-com.kian.perficontemplate.template-app-release-4 D:\AndroidProject\Perficon\template-app\build\intermediates\merged_res\release\mergeReleaseResources
-com.kian.perficontemplate.template-app-main-5 D:\AndroidProject\Perficon\template-app\src\main\res
-com.kian.perficontemplate.template-app-release-6 D:\AndroidProject\Perficon\template-app\src\release\res
-gradleHome-0 C:\Users\taki\.gradle

@@ -4,24 +4,7 @@
             "outputFile": "com.kian.perficontemplate.template-app-mergeDebugResources-36:/values-ro/values-ro.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\8bd2b02dc32ec8255f59592dd35af483\\transformed\\material\\res\\values-ro\\values-ro.xml",
-                    "from": {
-                        "startLines": "2",
-                        "startColumns": "4",
-                        "startOffsets": "55",
-                        "endColumns": "88",
-                        "endOffsets": "139"
-                    },
-                    "to": {
-                        "startLines": "84",
-                        "startColumns": "4",
-                        "startOffsets": "9076",
-                        "endColumns": "88",
-                        "endOffsets": "9160"
-                    }
-                },
-                {
-                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\5fd4b13289b089f5e2eed1efbb4f5835\\transformed\\foundation\\res\\values-ro\\values-ro.xml",
+                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\348bcfc3ffad572007a45e82c27bf1ca\\transformed\\foundation\\res\\values-ro\\values-ro.xml",
                     "from": {
                         "startLines": "2,3,4",
                         "startColumns": "4,4,4",
@@ -38,24 +21,24 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\0557d1a89b2ab0dab2faca2acd62fa2e\\transformed\\ui\\res\\values-ro\\values-ro.xml",
+                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\2e50b5c10c32feb26bb71090e9c56f73\\transformed\\material\\res\\values-ro\\values-ro.xml",
                     "from": {
-                        "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
-                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
-                        "startOffsets": "105,212,309,393,490,592,680,758,845,936,1018,1106,1196,1269,1354,1428,1507,1582,1659,1726",
-                        "endColumns": "106,96,83,96,101,87,77,86,90,81,87,89,72,84,73,78,74,76,66,114",
-                        "endOffsets": "207,304,388,485,587,675,753,840,931,1013,1101,1191,1264,1349,1423,1502,1577,1654,1721,1836"
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "88",
+                        "endOffsets": "139"
                     },
                     "to": {
-                        "startLines": "3,11,12,13,14,15,16,17,85,86,87,88,89,90,91,92,93,95,96,97",
-                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
-                        "startOffsets": "220,1054,1151,1235,1332,1434,1522,1600,9165,9256,9338,9426,9516,9589,9674,9748,9827,10003,10080,10147",
-                        "endColumns": "106,96,83,96,101,87,77,86,90,81,87,89,72,84,73,78,74,76,66,114",
-                        "endOffsets": "322,1146,1230,1327,1429,1517,1595,1682,9251,9333,9421,9511,9584,9669,9743,9822,9897,10075,10142,10257"
+                        "startLines": "84",
+                        "startColumns": "4",
+                        "startOffsets": "9076",
+                        "endColumns": "88",
+                        "endOffsets": "9160"
                     }
                 },
                 {
-                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\ed66b95352a8fb1291497fd3c072e18e\\transformed\\material3\\res\\values-ro\\values-ro.xml",
+                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\e7cada3a288c38eb53f2087f017640c1\\transformed\\material3\\res\\values-ro\\values-ro.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -72,7 +55,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\93b648aafde459d850e604e18a0b7559\\transformed\\core-1.16.0\\res\\values-ro\\values-ro.xml",
+                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\28812472732ee28d7352e0ce849a1593\\transformed\\core-1.16.0\\res\\values-ro\\values-ro.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9",
                         "startColumns": "4,4,4,4,4,4,4,4",
@@ -86,6 +69,23 @@
                         "startOffsets": "327,425,527,627,726,828,937,9902",
                         "endColumns": "97,101,99,98,101,108,116,100",
                         "endOffsets": "420,522,622,721,823,932,1049,9998"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\taki\\.gradle\\caches\\9.5.1\\transforms\\54b20d169d0714b6143a306d11dd4e1d\\transformed\\ui\\res\\values-ro\\values-ro.xml",
+                    "from": {
+                        "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "105,212,309,393,490,592,680,758,845,936,1018,1106,1196,1269,1354,1428,1507,1582,1659,1726",
+                        "endColumns": "106,96,83,96,101,87,77,86,90,81,87,89,72,84,73,78,74,76,66,114",
+                        "endOffsets": "207,304,388,485,587,675,753,840,931,1013,1101,1191,1264,1349,1423,1502,1577,1654,1721,1836"
+                    },
+                    "to": {
+                        "startLines": "3,11,12,13,14,15,16,17,85,86,87,88,89,90,91,92,93,95,96,97",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "220,1054,1151,1235,1332,1434,1522,1600,9165,9256,9338,9426,9516,9589,9674,9748,9827,10003,10080,10147",
+                        "endColumns": "106,96,83,96,101,87,77,86,90,81,87,89,72,84,73,78,74,76,66,114",
+                        "endOffsets": "322,1146,1230,1327,1429,1517,1595,1682,9251,9333,9421,9511,9584,9669,9743,9822,9897,10075,10142,10257"
                     }
                 }
             ]
