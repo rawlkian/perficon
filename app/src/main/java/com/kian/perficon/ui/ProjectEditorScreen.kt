@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,16 +126,16 @@ fun ProjectEditorScreen(
     val mappings by remember(projectId) { viewModel.getMappingsForProject(projectId) }.collectAsState(initial = emptyList())
     val project by remember(projectId) { viewModel.getProjectById(projectId) }.collectAsState(initial = null)
     
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by rememberSaveable(projectId) { mutableStateOf(0) }
     val context = LocalContext.current
     val currentLanguage = LocalAppLanguage.current
     val scope = rememberCoroutineScope()
 
-    var searchQuery by remember { mutableStateOf("") }
-    var searchMode by remember { mutableStateOf(0) } 
-    var isSearchOverlayVisible by remember { mutableStateOf(false) }
-    var isSearchActive by remember { mutableStateOf(false) }
-    var showUncoveredOnly by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(projectId) { mutableStateOf("") }
+    var searchMode by rememberSaveable(projectId) { mutableStateOf(0) }
+    var isSearchOverlayVisible by rememberSaveable(projectId) { mutableStateOf(false) }
+    var isSearchActive by rememberSaveable(projectId) { mutableStateOf(false) }
+    var showUncoveredOnly by rememberSaveable(projectId) { mutableStateOf(false) }
     var installedApps by remember { mutableStateOf(emptyList<AppInfo>()) }
     var showStatsDialog by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
