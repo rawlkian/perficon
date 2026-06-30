@@ -132,7 +132,6 @@ fun ProjectEditorScreen(
     val scope = rememberCoroutineScope()
 
     var searchQuery by rememberSaveable(projectId) { mutableStateOf("") }
-    var searchMode by rememberSaveable(projectId) { mutableStateOf(0) }
     var isSearchOverlayVisible by rememberSaveable(projectId) { mutableStateOf(false) }
     var isSearchActive by rememberSaveable(projectId) { mutableStateOf(false) }
     var showUncoveredOnly by rememberSaveable(projectId) { mutableStateOf(false) }
@@ -183,7 +182,7 @@ fun ProjectEditorScreen(
         }
     }
 
-    val displayMappings = remember(mappings, selectedTab, isSearchActive, searchQuery, searchMode, dynamicCalendarEnabled, dynamicClockEnabled) {
+    val displayMappings = remember(mappings, selectedTab, isSearchActive, searchQuery, dynamicCalendarEnabled, dynamicClockEnabled) {
         val type = when (selectedTab) {
             1 -> buildList {
                 if (dynamicCalendarEnabled) add(1)
@@ -200,8 +199,7 @@ fun ProjectEditorScreen(
         if (!isSearchActive || searchQuery.isEmpty()) baseList
         else {
             baseList.filter { 
-                val target = if (searchMode == 0) it.targetPackageName else it.displayName()
-                target.contains(searchQuery, ignoreCase = true)
+                it.targetPackageName.contains(searchQuery, ignoreCase = true)
             }
         }
     }
@@ -470,7 +468,7 @@ fun ProjectEditorScreen(
             }
         }
 
-        if (isSearchOverlayVisible) SearchOverlay(searchQuery, searchMode, { searchQuery = it }, { searchMode = it }, { isSearchActive = true; isSearchOverlayVisible = false }, { isSearchOverlayVisible = false })
+        if (isSearchOverlayVisible) SearchOverlay(searchQuery, { searchQuery = it }, { isSearchActive = true; isSearchOverlayVisible = false }, { isSearchOverlayVisible = false })
 
         if (showProjectEditDialog && project != null) {
             val currentProject = project!!
@@ -1946,7 +1944,7 @@ private fun IconMapping.displayName(): String =
     iconName.ifBlank { packageTail(targetPackageName) }
 
 @Composable
-fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, onS: () -> Unit, onD: () -> Unit) {
+fun SearchOverlay(q: String, onQ: (String) -> Unit, onS: () -> Unit, onD: () -> Unit) {
     val fr = remember { FocusRequester() }
     LaunchedEffect(Unit) { fr.requestFocus() }
     Dialog(onD) {
@@ -1957,12 +1955,7 @@ fun SearchOverlay(q: String, m: Int, onQ: (String) -> Unit, onM: (Int) -> Unit, 
         ) {
             Column(Modifier.padding(24.dp), Arrangement.spacedBy(16.dp)) {
                 Text("搜索图标", style = MaterialTheme.typography.headlineSmall)
-                OutlinedTextField(q, onQ, Modifier.fillMaxWidth().focusRequester(fr), placeholder = { Text("例如：音乐") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(m == 0, { onM(0) }); Text("包名", Modifier.clickable { onM(0) })
-                    Spacer(Modifier.width(16.dp))
-                    RadioButton(m == 1, { onM(1) }); Text("图标名称", Modifier.clickable { onM(1) })
-                }
+                OutlinedTextField(q, onQ, Modifier.fillMaxWidth().focusRequester(fr), placeholder = { Text("例如：com.example.app") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.large)
                 Row(Modifier.fillMaxWidth(), Arrangement.End) {
                     TextButton(onD) { Text("取消") }
                     Button(onS, enabled = q.isNotBlank()) { Text("搜索") }
@@ -2043,13 +2036,19 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
     if (project == null) return
     val context = LocalContext.current
     var showBackMenu by remember { mutableStateOf(false) }
+    var showUponMenu by remember { mutableStateOf(false) }
     var currentPickingType by remember { mutableStateOf<String?>(null) }
+    val uponPaths = project.iconUponPath?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
     val stylePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             saveIconToInternalStorage(context, it, "global_${System.currentTimeMillis()}.png", project.id)?.let { path ->
                 when (currentPickingType) {
                     "mask" -> onUpdate(project.copy(iconMaskPath = path))
-                    "upon" -> onUpdate(project.copy(iconUponPath = path))
+                    "upon" -> {
+                        val current = project.iconUponPath?.split(",")?.filter { it.isNotEmpty() }?.toMutableList() ?: mutableListOf()
+                        current.add(path)
+                        onUpdate(project.copy(iconUponPath = current.joinToString(",")))
+                    }
                     "back" -> {
                         val current = project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.toMutableList() ?: mutableListOf()
                         current.add(path)
@@ -2083,18 +2082,33 @@ fun GlobalSettings(project: IconPackProject?, onUpdate: (IconPackProject) -> Uni
                 Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
             }
         )
-        IconSettingItem(
-            title = "叠层",
-            desc = "显示在图标最上方的覆盖层",
-            path = project.iconUponPath,
-            onPickFromGallery = { currentPickingType = "upon"; stylePickerLauncher.launch("image/*") },
-            onPickFromFile = { currentPickingType = "upon"; stylePickerLauncher.launch("*/*") },
-            onRemove = { onUpdate(project.copy(iconUponPath = null)) },
-            onDownload = { path ->
-                val ok = saveImageToPictures(context, path)
-                Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+        Text("叠层", style = MaterialTheme.typography.titleMedium)
+        uponPaths.forEachIndexed { index, path ->
+            IconSettingItem(
+                title = "叠层 ${index + 1}",
+                desc = "显示在图标最上方的覆盖层",
+                path = path,
+                onPickFromGallery = {},
+                onPickFromFile = {},
+                onRemove = {
+                    val remaining = uponPaths.filter { it != path }
+                    onUpdate(project.copy(iconUponPath = if (remaining.isEmpty()) null else remaining.joinToString(",")))
+                },
+                onDownload = { assetPath ->
+                    val ok = saveImageToPictures(context, assetPath)
+                    Toast.makeText(context, if (ok) "已保存到相册" else "保存失败", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            RetroOutlinedButton(onClick = { showUponMenu = true }, Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("添加叠层")
             }
-        )
+            RetroDropdownMenu(expanded = showUponMenu, onDismissRequest = { showUponMenu = false }) {
+                DropdownMenuItem(text = { Text("从图库选择") }, onClick = { showUponMenu = false; currentPickingType = "upon"; stylePickerLauncher.launch("image/*") })
+                DropdownMenuItem(text = { Text("从文件选择") }, onClick = { showUponMenu = false; currentPickingType = "upon"; stylePickerLauncher.launch("*/*") })
+            }
+        }
         
         Text("背景", style = MaterialTheme.typography.titleMedium)
         project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.forEach { path ->

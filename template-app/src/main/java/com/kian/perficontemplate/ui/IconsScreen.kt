@@ -135,8 +135,7 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
     val filtered = remember(unifiedList, query) {
         if (query.isBlank()) unifiedList
         else unifiedList.filter { icon ->
-            icon.iconName.contains(query, ignoreCase = true) ||
-            icon.mappings.any { it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true) }
+            icon.mappings.any { it.packageName.contains(query, ignoreCase = true) }
         }
     }
 
@@ -150,7 +149,7 @@ fun IconsScreen(icons: List<IconEntry>, dynamics: List<DynamicEntry>) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text(dynamicStringResource("search_hint", "搜索图标或应用包名..."), style = MaterialTheme.typography.bodyMedium) },
+                placeholder = { Text(dynamicStringResource("search_hint", "搜索应用包名..."), style = MaterialTheme.typography.bodyMedium) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
                         IconButton(onClick = { query = ""; focusManager.clearFocus() }) {

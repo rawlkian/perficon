@@ -80,14 +80,14 @@ class IconPackViewModel(application: Application) : AndroidViewModel(application
                 newFile.absolutePath
             } else null
         }
-        val newUpon = project.iconUponPath?.let { path ->
+        val newUpon = project.iconUponPath?.split(",")?.filter { it.isNotEmpty() }?.mapNotNull { path ->
             val file = File(path)
             if (file.exists()) {
-                val newFile = File(newIconsDir, "upon_${System.currentTimeMillis()}.png")
+                val newFile = File(newIconsDir, "upon_${System.currentTimeMillis()}_${file.name}")
                 file.copyTo(newFile)
                 newFile.absolutePath
             } else null
-        }
+        }?.joinToString(",")
         val newBacks = project.iconBackPaths?.split(",")?.filter { it.isNotEmpty() }?.mapNotNull { path ->
             val file = File(path)
             if (file.exists()) {

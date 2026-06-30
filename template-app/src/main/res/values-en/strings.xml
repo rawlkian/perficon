@@ -6,7 +6,7 @@
     <string name="tab_about">About</string>
     <string name="tab_icons">Icons</string>
     <string name="tab_dynamic">Dynamic Icons</string>
-    <string name="search_hint">Search icons or package names</string>
+    <string name="search_hint">Search package names</string>
     <string name="footer_line1">This icon pack was exported and created by Perficon.</string>
     <string name="footer_line2">Presented by Kian</string>
     <string name="no_results">No matching icons found</string>

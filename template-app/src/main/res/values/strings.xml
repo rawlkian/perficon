@@ -6,7 +6,7 @@
     <string name="tab_about">关于</string>
     <string name="tab_icons">图标</string>
     <string name="tab_dynamic">动态图标</string>
-    <string name="search_hint">搜索图标名称或包名</string>
+    <string name="search_hint">搜索应用包名</string>
     <string name="footer_line1">本图标包由 Perficon 导出创建。</string>
     <string name="footer_line2">Presented by Kian</string>
     <string name="no_results">未找到匹配的图标</string>

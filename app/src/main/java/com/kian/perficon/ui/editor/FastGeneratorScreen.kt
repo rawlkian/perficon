@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.SettingsBackupRestore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -110,8 +111,14 @@ fun FastGeneratorScreen(
     var scale by remember { mutableFloatStateOf(project.scaleFactor) }
     var maskPath by remember { mutableStateOf(project.iconMaskPath) }
     var uponPath by remember { mutableStateOf(project.iconUponPath) }
+    val projectBackPaths = remember(project.iconBackPaths) {
+        project.iconBackPaths
+            ?.split(",")
+            ?.filter(String::isNotBlank)
+            ?: emptyList()
+    }
     var backPath by remember {
-        mutableStateOf(project.iconBackPaths?.split(",")?.firstOrNull())
+        mutableStateOf(projectBackPaths.firstOrNull())
     }
     var backgroundColor by remember { mutableStateOf<Color?>(null) }
 
@@ -121,11 +128,12 @@ fun FastGeneratorScreen(
     var appIconToProcess by remember { mutableStateOf<Drawable?>(null) }
     var showIconTypeChoice by remember { mutableStateOf(false) }
     var showColorPicker by remember { mutableStateOf(false) }
+    var showBackPicker by remember { mutableStateOf(false) }
     var isEyedropperActive by remember { mutableStateOf(false) }
 
     var maskBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var backBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var uponBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var uponBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
 
     LaunchedEffect(maskPath) {
         val path = maskPath
@@ -174,24 +182,31 @@ fun FastGeneratorScreen(
     }
 
     LaunchedEffect(uponPath) {
-        val path = uponPath
-        uponBitmap = if (path != null) {
+        val paths = uponPath
+            ?.split(",")
+            ?.filter(String::isNotBlank)
+            ?: emptyList()
+        uponBitmaps = if (paths.isNotEmpty()) {
             withContext(Dispatchers.IO) {
-                try {
-                    BitmapFactory.decodeFile(path)
-                } catch (e: Exception) {
-                    null
+                paths.mapNotNull { path ->
+                    try {
+                        BitmapFactory.decodeFile(path)
+                    } catch (e: Exception) {
+                        null
+                    }
                 }
             }
         } else {
-            null
+            emptyList()
         }
     }
-    DisposableEffect(uponBitmap) {
-        val bitmap = uponBitmap
+    DisposableEffect(uponBitmaps) {
+        val bitmaps = uponBitmaps
         onDispose {
-            if (bitmap != null && !bitmap.isRecycled) {
-                bitmap.recycle()
+            bitmaps.forEach { bitmap ->
+                if (!bitmap.isRecycled) {
+                    bitmap.recycle()
+                }
             }
         }
     }
@@ -201,7 +216,7 @@ fun FastGeneratorScreen(
      * 最终都只通过这个入口替换 sourceBitmap。
      *
      * 这保证“来源类型”只影响素材提取，不影响后续的：
-     * Background → Source → Mask → Overlay 处理逻辑。
+     * Background → masked Source → Overlay 处理逻辑。
      */
     fun replaceSourceBitmap(newBitmap: Bitmap) {
         sourceBitmap
@@ -261,7 +276,13 @@ fun FastGeneratorScreen(
                 }
 
                 "upon" -> {
-                    uponPath = path
+                    val current = uponPath
+                        ?.split(",")
+                        ?.filter(String::isNotBlank)
+                        ?.toMutableList()
+                        ?: mutableListOf()
+                    current.add(path)
+                    uponPath = current.joinToString(",")
                 }
             }
         }
@@ -291,7 +312,7 @@ fun FastGeneratorScreen(
                                 maskBitmap = maskBitmap,
                                 backBitmap = backBitmap,
                                 backgroundColor = backgroundColor,
-                                uponBitmap = uponBitmap,
+                                uponBitmaps = uponBitmaps,
                                 scale = scale,
                                 offset = offset,
                                 density = density.density
@@ -347,7 +368,7 @@ fun FastGeneratorScreen(
                     maskBitmap,
                     backBitmap,
                     backgroundColor,
-                    uponBitmap,
+                    uponBitmaps,
                     scale,
                     offset,
                     density.density
@@ -357,7 +378,7 @@ fun FastGeneratorScreen(
                         maskBitmap = maskBitmap,
                         backBitmap = backBitmap,
                         backgroundColor = backgroundColor,
-                        uponBitmap = uponBitmap,
+                        uponBitmaps = uponBitmaps,
                         scale = scale,
                         offset = offset,
                         density = density.density
@@ -596,10 +617,7 @@ fun FastGeneratorScreen(
 
                         IconButton(
                             onClick = {
-                                backPath = project.iconBackPaths
-                                    ?.split(",")
-                                    ?.firstOrNull()
-
+                                backPath = projectBackPaths.firstOrNull()
                                 backgroundColor = null
                             }
                         ) {
@@ -614,6 +632,66 @@ fun FastGeneratorScreen(
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        if (projectBackPaths.size > 1) {
+                            Box(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    onClick = {
+                                        showBackPicker = true
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = MaterialTheme.shapes.medium,
+                                    color = if (backgroundColor == null && backPath in projectBackPaths) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surface
+                                    },
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Image,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("选择")
+                                    }
+                                }
+
+                                RetroDropdownMenu(
+                                    expanded = showBackPicker,
+                                    onDismissRequest = {
+                                        showBackPicker = false
+                                    }
+                                ) {
+                                    projectBackPaths.forEachIndexed { index, path ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text("背景 ${index + 1}")
+                                            },
+                                            leadingIcon = {
+                                                AsyncImage(
+                                                    model = File(path),
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(32.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                backPath = path
+                                                backgroundColor = null
+                                                showBackPicker = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Surface(
                             onClick = {
                                 pickingAssetType = "back"
@@ -1195,17 +1273,21 @@ private fun averageCoverage(
  */
 private fun createNormalizedShapeMask(
     sourceMask: Bitmap,
-    outputSize: Int
+    outputSize: Int,
+    destinationRect: RectF
 ): Bitmap {
     val safeSize = outputSize.coerceAtLeast(1)
+    val maskWidth = destinationRect.width().toInt().coerceAtLeast(1)
+    val maskHeight = destinationRect.height().toInt().coerceAtLeast(1)
 
     /*
-     * 先将原始 Mask 平滑缩放到最终输出尺寸，
-     * 保证背景、Source Image 与 Mask 使用完全相同的坐标。
+     * 先在 Mask 自己的目标尺寸内完成标准化，再居中贴回最终画布。
+     * Meeye 这类包的 iconmask 可能比 iconback 小，代表“源图裁切区”
+     * 而不是包含阴影的整张背景。
      */
     val scaledMask = Bitmap.createBitmap(
-        safeSize,
-        safeSize,
+        maskWidth,
+        maskHeight,
         Bitmap.Config.ARGB_8888
     )
 
@@ -1221,22 +1303,22 @@ private fun createNormalizedShapeMask(
         Rect(
             0,
             0,
-            safeSize,
-            safeSize
+            maskWidth,
+            maskHeight
         ),
         scalePaint
     )
 
-    val pixels = IntArray(safeSize * safeSize)
+    val pixels = IntArray(maskWidth * maskHeight)
 
     scaledMask.getPixels(
         pixels,
         0,
-        safeSize,
+        maskWidth,
         0,
         0,
-        safeSize,
-        safeSize
+        maskWidth,
+        maskHeight
     )
 
     var minAlpha = 255
@@ -1251,12 +1333,12 @@ private fun createNormalizedShapeMask(
     val sampleStep = (safeSize / 64).coerceAtLeast(1)
 
     var sampleY = 0
-    while (sampleY < safeSize) {
+    while (sampleY < maskHeight) {
         var sampleX = 0
 
-        while (sampleX < safeSize) {
+        while (sampleX < maskWidth) {
             val pixel = pixels[
-                sampleY * safeSize + sampleX
+                sampleY * maskWidth + sampleX
             ]
 
             val alpha =
@@ -1290,7 +1372,7 @@ private fun createNormalizedShapeMask(
                 luminanceRange < 24
 
     val rawCoverage =
-        IntArray(safeSize * safeSize)
+        IntArray(maskWidth * maskHeight)
 
     for (index in pixels.indices) {
         val pixel = pixels[index]
@@ -1339,15 +1421,15 @@ private fun createNormalizedShapeMask(
 
     val centerCoverage = averageCoverage(
         coverage = rawCoverage,
-        width = safeSize,
-        height = safeSize,
+        width = maskWidth,
+        height = maskHeight,
         normalizedPoints = centerPoints
     )
 
     val outerCoverage = averageCoverage(
         coverage = rawCoverage,
-        width = safeSize,
-        height = safeSize,
+        width = maskWidth,
+        height = maskHeight,
         normalizedPoints = outerPoints
     )
 
@@ -1364,7 +1446,7 @@ private fun createNormalizedShapeMask(
         outerCoverage > centerCoverage + 8f
 
     val normalizedPixels =
-        IntArray(safeSize * safeSize)
+        IntArray(maskWidth * maskHeight)
 
     for (index in rawCoverage.indices) {
         val normalizedAlpha =
@@ -1385,26 +1467,75 @@ private fun createNormalizedShapeMask(
     }
 
     val normalizedMask = Bitmap.createBitmap(
-        safeSize,
-        safeSize,
+        maskWidth,
+        maskHeight,
         Bitmap.Config.ARGB_8888
     )
 
     normalizedMask.setPixels(
         normalizedPixels,
         0,
-        safeSize,
+        maskWidth,
         0,
         0,
+        maskWidth,
+        maskHeight
+    )
+
+    val outputMask = Bitmap.createBitmap(
         safeSize,
-        safeSize
+        safeSize,
+        Bitmap.Config.ARGB_8888
+    )
+
+    Canvas(outputMask).drawBitmap(
+        normalizedMask,
+        null,
+        destinationRect,
+        scalePaint
     )
 
     if (!scaledMask.isRecycled) {
         scaledMask.recycle()
     }
+    if (!normalizedMask.isRecycled) {
+        normalizedMask.recycle()
+    }
 
-    return normalizedMask
+    return outputMask
+}
+
+private fun maskDestinationRect(
+    maskBitmap: Bitmap,
+    backBitmap: Bitmap?,
+    outputSize: Int
+): RectF {
+    if (
+        backBitmap == null ||
+        backBitmap.isRecycled ||
+        backBitmap.width <= 0 ||
+        backBitmap.height <= 0 ||
+        maskBitmap.width <= 0 ||
+        maskBitmap.height <= 0
+    ) {
+        return RectF(0f, 0f, outputSize.toFloat(), outputSize.toFloat())
+    }
+
+    val widthScale = (maskBitmap.width.toFloat() / backBitmap.width.toFloat())
+        .coerceIn(0.1f, 1f)
+    val heightScale = (maskBitmap.height.toFloat() / backBitmap.height.toFloat())
+        .coerceIn(0.1f, 1f)
+    val width = outputSize * widthScale
+    val height = outputSize * heightScale
+    val left = (outputSize - width) / 2f
+    val top = (outputSize - height) / 2f
+
+    return RectF(
+        left,
+        top,
+        left + width,
+        top + height
+    )
 }
 
 /**
@@ -1442,6 +1573,84 @@ private fun applyNormalizedMask(
     maskPaint.xfermode = null
 }
 
+private fun alphaBounds(
+    bitmap: Bitmap,
+    minAlpha: Int = 8
+): Rect? {
+    if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) {
+        return null
+    }
+
+    var left = bitmap.width
+    var top = bitmap.height
+    var right = -1
+    var bottom = -1
+
+    val row = IntArray(bitmap.width)
+    for (y in 0 until bitmap.height) {
+        bitmap.getPixels(
+            row,
+            0,
+            bitmap.width,
+            0,
+            y,
+            bitmap.width,
+            1
+        )
+        for (x in row.indices) {
+            if (android.graphics.Color.alpha(row[x]) >= minAlpha) {
+                left = minOf(left, x)
+                top = minOf(top, y)
+                right = maxOf(right, x)
+                bottom = maxOf(bottom, y)
+            }
+        }
+    }
+
+    if (right < left || bottom < top) {
+        return null
+    }
+
+    return Rect(
+        left,
+        top,
+        right + 1,
+        bottom + 1
+    )
+}
+
+private fun fitRectInside(
+    container: RectF,
+    aspectRatio: Float,
+    scale: Float,
+    offset: Offset
+): RectF {
+    val safeAspectRatio = aspectRatio
+        .takeIf { it.isFinite() && it > 0f }
+        ?: 1f
+
+    var width = container.width()
+    var height = width / safeAspectRatio
+    if (height > container.height()) {
+        height = container.height()
+        width = height * safeAspectRatio
+    }
+
+    val safeScale = scale.coerceAtLeast(0.01f)
+    width *= safeScale
+    height *= safeScale
+
+    val centerX = container.centerX() + offset.x
+    val centerY = container.centerY() + offset.y
+
+    return RectF(
+        centerX - width / 2f,
+        centerY - height / 2f,
+        centerX + width / 2f,
+        centerY + height / 2f
+    )
+}
+
 /**
  * 生成最终图标。
  *
@@ -1452,10 +1661,10 @@ private fun applyNormalizedMask(
  *
  * 都严格执行同一条处理流程：
  *
- * 1. 在 contentLayer 上绘制 Background；
- * 2. 在 Background 上方绘制 Source Image；
- * 3. 对整个 contentLayer 应用模板 Mask；
- * 4. 将裁切结果绘制到最终画布；
+ * 1. 在最终画布上绘制模板 Background 图；
+ * 2. 以模板 Mask 的可见边界作为 Source Image 的目标容器；
+ * 3. 将 Source Image 的有效内容等比放入容器后裁切；
+ * 4. 将裁切后的 sourceLayer 绘制到最终画布；
  * 5. 最后绘制 Overlay。
  *
  * 因此“原始图层”和“标准图标”的区别只存在于素材提取阶段，
@@ -1466,7 +1675,7 @@ fun generateFinalIcon(
     maskBitmap: Bitmap?,
     backBitmap: Bitmap?,
     backgroundColor: Color?,
-    uponBitmap: Bitmap?,
+    uponBitmaps: List<Bitmap>,
     scale: Float,
     offset: Offset,
     density: Float
@@ -1492,35 +1701,54 @@ fun generateFinalIcon(
     )
     val resultCanvas = Canvas(resultBitmap)
 
+    val shapeMask = maskBitmap
+        ?.let { mask ->
+            createNormalizedShapeMask(
+                sourceMask = mask,
+                outputSize = outputSize,
+                destinationRect = maskDestinationRect(
+                    maskBitmap = mask,
+                    backBitmap = backBitmap,
+                    outputSize = outputSize
+                )
+            )
+        }
+
+    val sourceContainer = shapeMask
+        ?.let(::alphaBounds)
+        ?.let { RectF(it) }
+        ?: RectF(outputRect)
+
+    // Template iconback is not clipped by launcher icon masks. Draw it first
+    // so shadows living outside the mask can remain visible.
+    if (backBitmap != null && !backBitmap.isRecycled) {
+        resultCanvas.drawBitmap(
+            backBitmap,
+            null,
+            outputRect,
+            normalPaint
+        )
+    }
+
     /*
-     * Background 与 Source Image 先合成到同一张透明内容层。
-     * 模板 Mask 随后只执行一次，避免不同来源走出不同逻辑。
+     * 只把需要被模板 Mask 裁切的内容放入 sourceLayer。
+     * 这与启动器处理 iconback/iconmask/iconupon 的层级保持一致：
+     * iconback 不裁切，Source Image 裁切，iconupon 最后覆盖。
      */
-    val contentLayer = Bitmap.createBitmap(
+    val sourceLayer = Bitmap.createBitmap(
         outputSize,
         outputSize,
         Bitmap.Config.ARGB_8888
     )
-    val contentCanvas = Canvas(contentLayer)
+    val sourceCanvas = Canvas(sourceLayer)
 
     // ====================================================
-    // Layer 1：Background
+    // Layer 1：Solid Background
     // ====================================================
-    when {
-        backgroundColor != null -> {
-            contentCanvas.drawColor(
-                backgroundColor.toArgb()
-            )
-        }
-
-        backBitmap != null -> {
-            contentCanvas.drawBitmap(
-                backBitmap,
-                null,
-                outputRect,
-                normalPaint
-            )
-        }
+    if (backgroundColor != null) {
+        sourceCanvas.drawColor(
+            backgroundColor.toArgb()
+        )
     }
 
     // ====================================================
@@ -1532,8 +1760,6 @@ fun generateFinalIcon(
         source.width > 0 &&
         source.height > 0
     ) {
-        contentCanvas.save()
-
         /*
          * offset 来自 192.dp 预览区域中的手势像素，
          * 在这里换算为 512 × 512 输出坐标。
@@ -1545,88 +1771,54 @@ fun generateFinalIcon(
             outputSize.toFloat() /
                     previewSizePx
 
-        contentCanvas.translate(
-            outputSize / 2f +
-                    offset.x * previewToOutputScale,
-            outputSize / 2f +
-                    offset.y * previewToOutputScale
+        /*
+         * 启动器套用未适配图标时通常按 app icon drawable 的完整
+         * viewport 缩放，不会先裁掉透明 padding。这里保留完整源图边界，
+         * 避免带内边距的旧式图标在生成器里被放大。
+         */
+        val sourceBounds = Rect(
+            0,
+            0,
+            source.width,
+            source.height
         )
 
-        contentCanvas.scale(
-            scale,
-            scale
+        val destinationRect = fitRectInside(
+            container = sourceContainer,
+            aspectRatio = sourceBounds.width().toFloat() /
+                    sourceBounds.height().toFloat(),
+            scale = scale,
+            offset = Offset(
+                offset.x * previewToOutputScale,
+                offset.y * previewToOutputScale
+            )
         )
 
-        contentCanvas.translate(
-            -outputSize / 2f,
-            -outputSize / 2f
-        )
-
-        val sourceAspectRatio =
-            source.width.toFloat() /
-                    source.height.toFloat()
-
-        val drawWidth: Float
-        val drawHeight: Float
-
-        if (sourceAspectRatio >= 1f) {
-            drawWidth = outputSize.toFloat()
-            drawHeight =
-                outputSize / sourceAspectRatio
-        } else {
-            drawWidth =
-                outputSize * sourceAspectRatio
-            drawHeight = outputSize.toFloat()
-        }
-
-        val destinationLeft =
-            (outputSize - drawWidth) / 2f
-
-        val destinationTop =
-            (outputSize - drawHeight) / 2f
-
-        val destinationRect = RectF(
-            destinationLeft,
-            destinationTop,
-            destinationLeft + drawWidth,
-            destinationTop + drawHeight
-        )
-
-        contentCanvas.drawBitmap(
+        sourceCanvas.drawBitmap(
             source,
-            null,
+            sourceBounds,
             destinationRect,
             normalPaint
         )
-
-        contentCanvas.restore()
     }
 
     // ====================================================
     // Layer 3：Template Mask
     //
-    // 对 Background + Source Image 的整体结果只裁切一次。
+    // 只裁切纯色背景与 Source Image；模板 Background 图不参与裁切。
     // ====================================================
-    val shapeMask = maskBitmap
-        ?.let { mask ->
-            createNormalizedShapeMask(
-                sourceMask = mask,
-                outputSize = outputSize
-            )
-        }
-
     if (shapeMask != null) {
         applyNormalizedMask(
-            layerBitmap = contentLayer,
+            layerBitmap = sourceLayer,
             shapeMask = shapeMask
         )
     }
 
     /*
-     * Mask 完成后才把整个内容层绘制到最终画布。
+     * Mask 完成后才把 sourceLayer 绘制到最终画布。
      */
     resultCanvas.drawBitmap(
-        contentLayer,
+        sourceLayer,
         0f,
         0f,
         normalPaint
@@ -1635,17 +1827,19 @@ fun generateFinalIcon(
     // ====================================================
     // Layer 4：Overlay
     // ====================================================
-    if (uponBitmap != null && !uponBitmap.isRecycled) {
-        resultCanvas.drawBitmap(
-            uponBitmap,
-            null,
-            outputRect,
-            normalPaint
-        )
+    uponBitmaps.forEach { uponBitmap ->
+        if (!uponBitmap.isRecycled) {
+            resultCanvas.drawBitmap(
+                uponBitmap,
+                null,
+                outputRect,
+                normalPaint
+            )
+        }
     }
 
-    if (!contentLayer.isRecycled) {
-        contentLayer.recycle()
+    if (!sourceLayer.isRecycled) {
+        sourceLayer.recycle()
     }
 
     if (

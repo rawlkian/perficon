@@ -43,7 +43,7 @@ class ApkGenerator(private val context: Context) {
     private data class StyleDrawableSlots(
         val mask: String?,
         val backs: List<String>,
-        val upon: String?
+        val upons: List<String>
     )
 
     /**
@@ -183,7 +183,12 @@ class ApkGenerator(private val context: Context) {
                             ?.map(::File)
                             ?.filter(File::isFile)
                             ?.forEach { add("back" to it) }
-                        project.iconUponPath?.let(::File)?.takeIf(File::isFile)?.let { add("upon" to it) }
+                        project.iconUponPath
+                            ?.split(",")
+                            ?.filter(String::isNotBlank)
+                            ?.map(::File)
+                            ?.filter(File::isFile)
+                            ?.forEach { add("upon" to it) }
                     }
                     if (uniqueIconPaths.size + styleFiles.size > slots.size) {
                         throw GenerationException(
@@ -204,11 +209,10 @@ class ApkGenerator(private val context: Context) {
                     val backDrawables = styleFiles.zip(styleSlots)
                         .filter { it.first.first == "back" }
                         .map { "icon_${it.second.index}" }
-                    val uponDrawable = styleFiles.zip(styleSlots)
-                        .firstOrNull { it.first.first == "upon" }
-                        ?.second
-                        ?.let { "icon_${it.index}" }
-                    val styleDrawableSlots = StyleDrawableSlots(maskDrawable, backDrawables, uponDrawable)
+                    val uponDrawables = styleFiles.zip(styleSlots)
+                        .filter { it.first.first == "upon" }
+                        .map { "icon_${it.second.index}" }
+                    val styleDrawableSlots = StyleDrawableSlots(maskDrawable, backDrawables, uponDrawables)
 
                     // Map unique iconPath to template slots.
                     val iconPathToSlot = uniqueIconPaths.zip(mappingSlots).toMap()
@@ -338,7 +342,7 @@ class ApkGenerator(private val context: Context) {
                         scaleFactor = project.scaleFactor,
                         iconMaskDrawable = styleDrawableSlots.mask,
                         iconBackDrawables = styleDrawableSlots.backs,
-                        iconUponDrawable = styleDrawableSlots.upon
+                        iconUponDrawables = styleDrawableSlots.upons
                     )
                     val currentLang = com.kian.perficon.ui.AppSettings(context).language.value
 
@@ -740,8 +744,11 @@ class ApkGenerator(private val context: Context) {
                 .joinToString(" ")
             sb.append("    <iconback $attributes />\n")
         }
-        styleDrawableSlots.upon?.let { drawable ->
-            sb.append("    <iconupon img1=\"$drawable\" />\n")
+        if (styleDrawableSlots.upons.isNotEmpty()) {
+            val attributes = styleDrawableSlots.upons
+                .mapIndexed { index, drawable -> "img${index + 1}=\"$drawable\"" }
+                .joinToString(" ")
+            sb.append("    <iconupon $attributes />\n")
         }
 
         mappings.zip(slotIndices).forEach { (mapping, slotIndex) ->

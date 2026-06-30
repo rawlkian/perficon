@@ -65,7 +65,7 @@ class IconPackImporter(
 
     private class GlobalOverlayConfig {
         var maskImg: String? = null
-        var uponImg: String? = null
+        val uponImgs = mutableListOf<String>()
         val backImgs = mutableSetOf<String>()
         var scaleFactor: Float? = null
     }
@@ -164,7 +164,7 @@ class IconPackImporter(
             progressFlow.value = ImportProgress(
                 totalItems = totalItems,
                 hasMask = globalConfig.maskImg != null,
-                hasUpon = globalConfig.uponImg != null,
+                hasUpon = globalConfig.uponImgs.isNotEmpty(),
                 backCount = globalConfig.backImgs.size
             )
 
@@ -310,13 +310,18 @@ class IconPackImporter(
                     currentProject = currentProject.copy(iconMaskPath = it)
                 }
             }
-            globalConfig.uponImg?.let { name ->
-                extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, "upon", projectIconsDir, contentDeduper)?.let {
-                    currentProject = currentProject.copy(iconUponPath = it)
+            if (globalConfig.uponImgs.isNotEmpty()) {
+                val paths = globalConfig.uponImgs.mapIndexedNotNull { index, name ->
+                    val outputName = sanitizeOutputFileName("upon_${index + 1}_${normalizeDrawableResourceName(name)}")
+                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, outputName, projectIconsDir, contentDeduper)
                 }
+                if (paths.isNotEmpty()) currentProject = currentProject.copy(iconUponPath = paths.joinToString(","))
             }
             if (globalConfig.backImgs.isNotEmpty()) {
-                val paths = globalConfig.backImgs.mapNotNull { extractDrawableToPrivateStorage(remoteContext, sourcePackageName, it, "back_${it}", projectIconsDir, contentDeduper) }
+                val paths = globalConfig.backImgs.mapNotNull { name ->
+                    val outputName = sanitizeOutputFileName("back_${normalizeDrawableResourceName(name)}")
+                    extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, outputName, projectIconsDir, contentDeduper)
+                }
                 if (paths.isNotEmpty()) currentProject = currentProject.copy(iconBackPaths = paths.joinToString(","))
             }
             globalConfig.scaleFactor?.let { currentProject = currentProject.copy(scaleFactor = it) }
@@ -389,10 +394,28 @@ class IconPackImporter(
                                 dynamicClockDrawables += draw
                             }
                         }
-                        "iconmask" -> getSafeAttribute(parser, "img1")?.let { config.maskImg = it }
-                        "iconupon" -> getSafeAttribute(parser, "img1")?.let { config.uponImg = it }
-                        "iconback" -> for (i in 1..10) getSafeAttribute(parser, "img$i")?.let { config.backImgs.add(it) }
-                        "scale" -> getSafeAttribute(parser, "factor")?.toFloatOrNull()?.let { config.scaleFactor = it }
+                        "iconmask" -> {
+                            if (config.maskImg == null) {
+                                getSafeAttribute(parser, "img1")?.let { config.maskImg = it }
+                            }
+                        }
+                        "iconupon" -> {
+                            if (config.uponImgs.isEmpty()) {
+                                for (i in 1..10) {
+                                    getSafeAttribute(parser, "img$i")?.let { config.uponImgs.add(it) }
+                                }
+                            }
+                        }
+                        "iconback" -> {
+                            if (config.backImgs.isEmpty()) {
+                                for (i in 1..10) getSafeAttribute(parser, "img$i")?.let { config.backImgs.add(it) }
+                            }
+                        }
+                        "scale" -> {
+                            if (config.scaleFactor == null) {
+                                getSafeAttribute(parser, "factor")?.toFloatOrNull()?.let { config.scaleFactor = it }
+                            }
+                        }
                     }
                 }
                 eventType = parser.next()
@@ -447,13 +470,13 @@ class IconPackImporter(
         val lock = drawableLocks.getOrPut(lockKey) { Mutex() }
         
         lock.withLock {
-            val targetFile = File(outputDir, "$fileName.png")
+            val targetFile = File(outputDir, "${sanitizeOutputFileName(fileName)}.png")
             if (targetFile.exists() && targetFile.length() > 0) {
                 return@withLock targetFile.absolutePath
             }
             
             val res = remoteContext.resources
-            val name = drawableName.substringAfterLast("/")
+            val name = normalizeDrawableResourceName(drawableName)
             var resId = res.getIdentifier(name, "drawable", remotePkg)
             if (resId == 0) resId = res.getIdentifier(name, "mipmap", remotePkg)
             
@@ -466,7 +489,7 @@ class IconPackImporter(
                 } catch (e: Exception) {}
             }
 
-            val paths = listOf("res/drawable-nodpi-v4/$name.png", "res/drawable/$name.png", "res/mipmap-xxxhdpi-v4/$name.png")
+            val paths = drawableAssetCandidates(drawableName)
             for (path in paths) {
                 try {
                     remoteContext.assets.openNonAssetFd(path).createInputStream().use { input ->
@@ -510,6 +533,9 @@ class IconPackImporter(
             .digest(bytes)
             .joinToString("") { "%02x".format(it) }
 
+    private fun sanitizeOutputFileName(value: String): String =
+        value.replace(Regex("[^A-Za-z0-9._-]"), "_")
+
     private fun drawableToBitmap(drawable: Drawable): Bitmap {
         val w = if (drawable.intrinsicWidth <= 10) 256 else drawable.intrinsicWidth
         val h = if (drawable.intrinsicHeight <= 10) 256 else drawable.intrinsicHeight
@@ -519,4 +545,61 @@ class IconPackImporter(
         drawable.draw(canvas)
         return bitmap
     }
+}
+
+internal fun normalizeDrawableResourceName(drawableName: String): String {
+    val withoutPrefix = drawableName
+        .substringAfterLast("/")
+        .substringAfterLast(":")
+        .removePrefix("@")
+    return withoutPrefix.substringBeforeLast(".", withoutPrefix)
+}
+
+internal fun drawableAssetCandidates(drawableName: String): List<String> {
+    val rawPath = drawableName
+        .removePrefix("@")
+        .substringAfter(":")
+        .replace('\\', '/')
+    val normalized = normalizeDrawableResourceName(drawableName)
+    val rawFileName = rawPath.substringAfterLast("/")
+    val fileNames = buildList {
+        if (rawFileName.contains(".")) add(rawFileName)
+        add("$normalized.png")
+        add("$normalized.webp")
+    }.distinct()
+    val folders = listOf(
+        "res/drawable-nodpi-v4",
+        "res/drawable-nodpi",
+        "res/drawable-anydpi-v26",
+        "res/drawable-anydpi",
+        "res/drawable-xxxhdpi-v4",
+        "res/drawable-xxxhdpi",
+        "res/drawable-xxhdpi-v4",
+        "res/drawable-xxhdpi",
+        "res/drawable-xhdpi-v4",
+        "res/drawable-xhdpi",
+        "res/drawable-hdpi-v4",
+        "res/drawable-hdpi",
+        "res/drawable-mdpi-v4",
+        "res/drawable-mdpi",
+        "res/drawable-v24",
+        "res/drawable",
+        "res/mipmap-xxxhdpi-v4",
+        "res/mipmap-xxxhdpi",
+        "res/mipmap-xxhdpi-v4",
+        "res/mipmap-xxhdpi",
+        "res/mipmap-xhdpi-v4",
+        "res/mipmap-xhdpi",
+        "res/mipmap-hdpi-v4",
+        "res/mipmap-hdpi",
+        "res/mipmap-mdpi-v4",
+        "res/mipmap-mdpi",
+        "res/mipmap"
+    )
+    return buildList {
+        if (rawPath.startsWith("res/") && rawPath.substringAfterLast("/").contains(".")) add(rawPath)
+        folders.forEach { folder ->
+            fileNames.forEach { fileName -> add("$folder/$fileName") }
+        }
+    }.distinct()
 }
