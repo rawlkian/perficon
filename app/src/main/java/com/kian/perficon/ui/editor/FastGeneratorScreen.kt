@@ -582,6 +582,7 @@ fun FastGeneratorScreen(
                 AssetRow(
                     label = "1. Overlay",
                     path = uponPath,
+                    actionIcon = Icons.Default.PhotoLibrary,
                     onPick = {
                         pickingAssetType = "upon"
                         universalPicker.launch("image/*")
@@ -597,6 +598,7 @@ fun FastGeneratorScreen(
                 AssetRow(
                     label = "2. Mask (Shape)",
                     path = maskPath,
+                    actionIcon = Icons.Default.Apps,
                     onPick = {
                         pickingAssetType = "mask"
                         universalPicker.launch("image/*")
@@ -674,7 +676,7 @@ fun FastGeneratorScreen(
                                         horizontalArrangement = Arrangement.Center
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Image,
+                                            imageVector = Icons.Default.Palette,
                                             contentDescription = null
                                         )
                                         Spacer(Modifier.width(8.dp))
@@ -912,6 +914,7 @@ internal fun List<String>.fastGeneratorDefaultBackPath(): String? {
 fun AssetRow(
     label: String,
     path: String?,
+    actionIcon: androidx.compose.ui.graphics.vector.ImageVector,
     onPick: () -> Unit,
     onRestore: () -> Unit,
     onClear: () -> Unit
@@ -972,6 +975,12 @@ fun AssetRow(
                 onClick = onPick,
                 modifier = Modifier.padding(start = 8.dp)
             ) {
+                Icon(
+                    imageVector = actionIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(6.dp))
                 Text(
                     text = if (path.isNullOrBlank()) {
                         "选择"
