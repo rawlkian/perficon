@@ -21,4 +21,22 @@ class IconPackImporterTest {
         assertTrue(candidates.contains("res/drawable-xhdpi-v4/meeyo_shadow.webp"))
         assertTrue(candidates.contains("res/mipmap-xxxhdpi-v4/meeyo_shadow.png"))
     }
+
+    @Test
+    fun expandsIconBackSiblingResourcesInOrder() {
+        val expanded = expandIconBackResourceNames(listOf("icon_back")) { candidate ->
+            candidate == "icon_back_2"
+        }
+
+        assertEquals(listOf("icon_back", "icon_back_2"), expanded)
+    }
+
+    @Test
+    fun doesNotDuplicateExplicitIconBackSibling() {
+        val expanded = expandIconBackResourceNames(listOf("icon_back", "icon_back_2")) { candidate ->
+            candidate == "icon_back_2"
+        }
+
+        assertEquals(listOf("icon_back", "icon_back_2"), expanded)
+    }
 }

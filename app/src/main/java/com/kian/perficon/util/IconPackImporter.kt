@@ -66,7 +66,7 @@ class IconPackImporter(
     private class GlobalOverlayConfig {
         var maskImg: String? = null
         val uponImgs = mutableListOf<String>()
-        val backImgs = mutableSetOf<String>()
+        val backImgs = mutableListOf<String>()
         var scaleFactor: Float? = null
     }
 
@@ -134,6 +134,11 @@ class IconPackImporter(
                 progressFlow.value = progressFlow.value.copy(error = "No valid mapping found", isFinished = true)
                 return@withContext false
             }
+            val globalBackImgs = expandIconBackResourceNames(globalConfig.backImgs) { candidate ->
+                val res = remoteContext.resources
+                res.getIdentifier(candidate, "drawable", sourcePackageName) != 0 ||
+                    res.getIdentifier(candidate, "mipmap", sourcePackageName) != 0
+            }
 
             // Create project first to get ID
             projectId = repository.insertProject(IconPackProject(name = newProjectName, packageName = newPackageName, description = description))
@@ -165,7 +170,7 @@ class IconPackImporter(
                 totalItems = totalItems,
                 hasMask = globalConfig.maskImg != null,
                 hasUpon = globalConfig.uponImgs.isNotEmpty(),
-                backCount = globalConfig.backImgs.size
+                backCount = globalBackImgs.size
             )
 
             val calendarComponents = allIconsMap.values
@@ -305,9 +310,14 @@ class IconPackImporter(
             }
 
             // Global Styles
+            var importedMaskPath: String? = currentProject.iconMaskPath
+            var importedBackPaths: String? = currentProject.iconBackPaths
+            var importedUponPath: String? = currentProject.iconUponPath
+            var importedScaleFactor = currentProject.scaleFactor
+
             globalConfig.maskImg?.let { name ->
                 extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, "mask", projectIconsDir, contentDeduper)?.let {
-                    currentProject = currentProject.copy(iconMaskPath = it)
+                    importedMaskPath = it
                 }
             }
             if (globalConfig.uponImgs.isNotEmpty()) {
@@ -315,18 +325,24 @@ class IconPackImporter(
                     val outputName = sanitizeOutputFileName("upon_${index + 1}_${normalizeDrawableResourceName(name)}")
                     extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, outputName, projectIconsDir, contentDeduper)
                 }
-                if (paths.isNotEmpty()) currentProject = currentProject.copy(iconUponPath = paths.joinToString(","))
+                if (paths.isNotEmpty()) importedUponPath = paths.joinToString(",")
             }
-            if (globalConfig.backImgs.isNotEmpty()) {
-                val paths = globalConfig.backImgs.mapNotNull { name ->
+            if (globalBackImgs.isNotEmpty()) {
+                val paths = globalBackImgs.mapNotNull { name ->
                     val outputName = sanitizeOutputFileName("back_${normalizeDrawableResourceName(name)}")
                     extractDrawableToPrivateStorage(remoteContext, sourcePackageName, name, outputName, projectIconsDir, contentDeduper)
                 }
-                if (paths.isNotEmpty()) currentProject = currentProject.copy(iconBackPaths = paths.joinToString(","))
+                if (paths.isNotEmpty()) importedBackPaths = paths.joinToString(",")
             }
-            globalConfig.scaleFactor?.let { currentProject = currentProject.copy(scaleFactor = it) }
-            
-            repository.updateProject(currentProject)
+            globalConfig.scaleFactor?.let { importedScaleFactor = it }
+
+            repository.updateProjectStyle(
+                projectId = projectId,
+                maskPath = importedMaskPath,
+                backPaths = importedBackPaths,
+                uponPath = importedUponPath,
+                scaleFactor = importedScaleFactor
+            )
             importSuccessful = true
             progressFlow.value = progressFlow.value.copy(isFinished = true)
             true
@@ -400,15 +416,17 @@ class IconPackImporter(
                             }
                         }
                         "iconupon" -> {
-                            if (config.uponImgs.isEmpty()) {
-                                for (i in 1..10) {
-                                    getSafeAttribute(parser, "img$i")?.let { config.uponImgs.add(it) }
+                            for (i in 1..10) {
+                                getSafeAttribute(parser, "img$i")?.let { value ->
+                                    config.uponImgs.addIfAbsent(value)
                                 }
                             }
                         }
                         "iconback" -> {
-                            if (config.backImgs.isEmpty()) {
-                                for (i in 1..10) getSafeAttribute(parser, "img$i")?.let { config.backImgs.add(it) }
+                            for (i in 1..10) {
+                                getSafeAttribute(parser, "img$i")?.let { value ->
+                                    config.backImgs.addIfAbsent(value)
+                                }
                             }
                         }
                         "scale" -> {
@@ -454,6 +472,10 @@ class IconPackImporter(
         val minute = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_minute", "clock_minute_${drawableName}", outputDir, contentDeduper) } ?: hour
         val second = slot?.let { extractDrawableToPrivateStorage(remoteContext, remotePkg, "clock_${it}_second", "clock_second_${drawableName}", outputDir, contentDeduper) } ?: minute
         return background?.let { DynamicIconAssets.ClockLayers(it, hour ?: it, minute ?: hour ?: it, second ?: minute ?: hour ?: it) }
+    }
+
+    private fun MutableList<String>.addIfAbsent(value: String) {
+        if (none { it == value }) add(value)
     }
 
     private suspend fun extractDrawableToPrivateStorage(
@@ -553,6 +575,35 @@ internal fun normalizeDrawableResourceName(drawableName: String): String {
         .substringAfterLast(":")
         .removePrefix("@")
     return withoutPrefix.substringBeforeLast(".", withoutPrefix)
+}
+
+internal fun expandIconBackResourceNames(
+    configuredNames: List<String>,
+    resourceExists: (String) -> Boolean
+): List<String> {
+    val expanded = mutableListOf<String>()
+    fun add(value: String) {
+        if (expanded.none { it == value }) expanded += value
+    }
+
+    configuredNames.forEach { configuredName ->
+        add(configuredName)
+
+        val normalized = normalizeDrawableResourceName(configuredName)
+        val shouldProbeSiblings =
+            normalized.contains("icon_back", ignoreCase = true) ||
+                normalized.endsWith("back", ignoreCase = true) ||
+                normalized.endsWith("background", ignoreCase = true)
+
+        if (shouldProbeSiblings) {
+            for (index in 2..10) {
+                val candidate = "${normalized}_$index"
+                if (resourceExists(candidate)) add(candidate)
+            }
+        }
+    }
+
+    return expanded
 }
 
 internal fun drawableAssetCandidates(drawableName: String): List<String> {

@@ -1,0 +1,5 @@
+logical_name,apk_entry,file,bytes,width,height,transparent_ratio,opaque_ratio,partial_alpha_ratio,unique_colors_64px,avg_rgb_stddev_64px
+icon_back,res/nVg.png,D:\AndroidProject\Perficon\extracted\meeye-real-layers\images\icon_back.png,6017,256,256,0.1644,0.7187,0.117,279,99.2
+icon_back_2,res/ff2.png,D:\AndroidProject\Perficon\extracted\meeye-real-layers\images\icon_back_2.png,3837,192,192,0.165,0.0,0.835,52,0.0
+icon_mask,res/hF7.png,D:\AndroidProject\Perficon\extracted\meeye-real-layers\images\icon_mask.png,992,192,192,0.714,0.2709,0.0151,61,0.0
+icon_upon,res/vut.png,D:\AndroidProject\Perficon\extracted\meeye-real-layers\images\icon_upon.png,2263,192,192,0.948,0.0,0.052,47,86.13

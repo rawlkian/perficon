@@ -117,9 +117,10 @@ fun FastGeneratorScreen(
             ?.filter(String::isNotBlank)
             ?: emptyList()
     }
-    var backPath by remember {
-        mutableStateOf(projectBackPaths.firstOrNull())
+    val defaultBackPath = remember(projectBackPaths) {
+        projectBackPaths.fastGeneratorDefaultBackPath()
     }
+    var backPath by remember(defaultBackPath) { mutableStateOf(defaultBackPath) }
     var backgroundColor by remember { mutableStateOf<Color?>(null) }
 
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -134,7 +135,6 @@ fun FastGeneratorScreen(
     var maskBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var backBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var uponBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
-
     LaunchedEffect(maskPath) {
         val path = maskPath
         maskBitmap = if (path != null) {
@@ -216,7 +216,7 @@ fun FastGeneratorScreen(
      * 最终都只通过这个入口替换 sourceBitmap。
      *
      * 这保证“来源类型”只影响素材提取，不影响后续的：
-     * Background → masked Source → Overlay 处理逻辑。
+     * optional Background → masked Source → Overlay 处理逻辑。
      */
     fun replaceSourceBitmap(newBitmap: Bitmap) {
         sourceBitmap
@@ -236,7 +236,7 @@ fun FastGeneratorScreen(
             getInstalledApps(context).firstOrNull { it.packageName == targetPackageName }?.icon
         }
         drawable?.let {
-            replaceSourceBitmap(drawableToOriginalBitmap(it, 512))
+            replaceSourceBitmap(drawableToIconPackSourceBitmap(it, 512))
         }
     }
 
@@ -588,6 +588,9 @@ fun FastGeneratorScreen(
                     },
                     onRestore = {
                         uponPath = project.iconUponPath
+                    },
+                    onClear = {
+                        uponPath = null
                     }
                 )
 
@@ -600,6 +603,9 @@ fun FastGeneratorScreen(
                     },
                     onRestore = {
                         maskPath = project.iconMaskPath
+                    },
+                    onClear = {
+                        maskPath = null
                     }
                 )
 
@@ -617,14 +623,27 @@ fun FastGeneratorScreen(
 
                         IconButton(
                             onClick = {
-                                backPath = projectBackPaths.firstOrNull()
+                                backPath = defaultBackPath
                                 backgroundColor = null
                             }
                         ) {
                             Icon(
                                 imageVector =
                                     Icons.Default.SettingsBackupRestore,
-                                contentDescription = localize("恢复默认背景", LocalAppLanguage.current)
+                                contentDescription = localize("应用图标包背景", LocalAppLanguage.current)
+                            )
+                        }
+
+                        IconButton(
+                            enabled = !backPath.isNullOrBlank() || backgroundColor != null,
+                            onClick = {
+                                backPath = null
+                                backgroundColor = null
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = localize("清空背景", LocalAppLanguage.current)
                             )
                         }
                     }
@@ -672,7 +691,7 @@ fun FastGeneratorScreen(
                                     projectBackPaths.forEachIndexed { index, path ->
                                         DropdownMenuItem(
                                             text = {
-                                                Text("背景 ${index + 1}")
+                                                Text(if (path == backPath) "背景 ${index + 1} ✓" else "背景 ${index + 1}")
                                             },
                                             leadingIcon = {
                                                 AsyncImage(
@@ -799,12 +818,12 @@ fun FastGeneratorScreen(
                     Text("选择图标来源", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        "两种模式只决定 Source Image 如何提取；之后都会统一经过 Background、模板 Mask 和 Overlay。"
+                        "这些模式只决定 Source Image 如何提取；之后都会统一经过可选 Background、模板 Mask 和 Overlay。"
                     )
                     Spacer(modifier = Modifier.height(24.dp))
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         RetroOutlinedButton(
                             onClick = {
@@ -817,11 +836,27 @@ fun FastGeneratorScreen(
                                 )
                                 showIconTypeChoice = false
                                 appIconToProcess = null
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("标准图标")
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        RetroOutlinedButton(
+                            onClick = {
+                                val drawable = requireNotNull(appIconToProcess)
+                                replaceSourceBitmap(
+                                    drawableToForegroundBitmap(
+                                        drawable = drawable,
+                                        size = 512
+                                    )
+                                )
+                                showIconTypeChoice = false
+                                appIconToProcess = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("前景图层")
+                        }
                         RetroButton(
                             onClick = {
                                 val drawable = requireNotNull(appIconToProcess)
@@ -833,9 +868,10 @@ fun FastGeneratorScreen(
                                 )
                                 showIconTypeChoice = false
                                 appIconToProcess = null
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("原始图层")
+                            Text("完整原始图层")
                         }
                     }
                 }
@@ -862,13 +898,28 @@ fun FastGeneratorScreen(
     }
 }
 
+internal fun List<String>.fastGeneratorDefaultBackPath(): String? {
+    if (isEmpty()) return null
+    return firstOrNull { path ->
+        val name = File(path).nameWithoutExtension
+        name.endsWith("_2", ignoreCase = true) ||
+            name.contains("icon_back_2", ignoreCase = true) ||
+            name.contains("back_icon_back_2", ignoreCase = true)
+    } ?: getOrNull(1) ?: first()
+}
+
 @Composable
 fun AssetRow(
     label: String,
     path: String?,
     onPick: () -> Unit,
-    onRestore: () -> Unit
+    onRestore: () -> Unit,
+    onClear: () -> Unit
 ) {
+    val previewPath = path
+        ?.split(",")
+        ?.firstOrNull(String::isNotBlank)
+
     Row(
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -881,14 +932,14 @@ fun AssetRow(
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (path != null) {
+            if (previewPath != null) {
                 Surface(
                     shape = MaterialTheme.shapes.small,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     modifier = Modifier.size(40.dp)
                 ) {
                     AsyncImage(
-                        model = File(path),
+                        model = File(previewPath),
                         contentDescription = "$label preview",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -906,12 +957,23 @@ fun AssetRow(
                 )
             }
 
+            IconButton(
+                enabled = !path.isNullOrBlank(),
+                onClick = onClear
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = localize("清空", LocalAppLanguage.current),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
             RetroOutlinedButton(
                 onClick = onPick,
                 modifier = Modifier.padding(start = 8.dp)
             ) {
                 Text(
-                    text = if (path == null) {
+                    text = if (path.isNullOrBlank()) {
                         "选择"
                     } else {
                         "更换"
@@ -1121,6 +1183,62 @@ fun drawableToStandardBitmap(
 }
 
 /**
+ * 前景图层：
+ *
+ * 当用户显式应用图标包 Background 时，iconback 已经承担了底座/阴影。
+ * 如果继续把 AdaptiveIconDrawable 的 background 当成 Source Image 绘制，
+ * 这层背景会覆盖 iconback 里的阴影。这里对 adaptive 图标只取 foreground，
+ * 非 adaptive 图标则保持完整 Drawable。
+ */
+fun drawableToForegroundBitmap(
+    drawable: Drawable,
+    size: Int = 512
+): Bitmap {
+    val safeSize = size.coerceAtLeast(1)
+
+    if (
+        android.os.Build.VERSION.SDK_INT >=
+        android.os.Build.VERSION_CODES.O &&
+        drawable is android.graphics.drawable.AdaptiveIconDrawable
+    ) {
+        return drawable.foreground
+            ?.let { foreground ->
+                drawDrawableToBitmap(
+                    drawable = foreground,
+                    size = safeSize
+                )
+            }
+            ?: drawDrawableToBitmap(
+                drawable = drawable,
+                size = safeSize
+            )
+    }
+
+    return drawDrawableToBitmap(
+        drawable = drawable,
+        size = safeSize
+    )
+}
+
+/**
+ * 快速生成器默认源图：
+ *
+ * 自动从目标应用带入 Source Image 时使用这个入口。对
+ * AdaptiveIconDrawable 使用完整原始图层，保留应用自己的
+ * background 与 foreground；之后再由模板 mask/scale 决定
+ * 未适配图标的可见形状。
+ */
+fun drawableToIconPackSourceBitmap(
+    drawable: Drawable,
+    size: Int = 512
+): Bitmap {
+    return drawableToOriginalBitmap(
+        drawable = drawable,
+        size = size
+    )
+}
+
+/**
  * 原始图层：
  *
  * 对 AdaptiveIconDrawable 分别绘制 background 与 foreground，
@@ -1277,13 +1395,18 @@ private fun createNormalizedShapeMask(
     destinationRect: RectF
 ): Bitmap {
     val safeSize = outputSize.coerceAtLeast(1)
-    val maskWidth = destinationRect.width().toInt().coerceAtLeast(1)
-    val maskHeight = destinationRect.height().toInt().coerceAtLeast(1)
+    val maskWidth = destinationRect.width()
+        .roundToInt()
+        .coerceAtLeast(1)
+    val maskHeight = destinationRect.height()
+        .roundToInt()
+        .coerceAtLeast(1)
 
     /*
-     * 先在 Mask 自己的目标尺寸内完成标准化，再居中贴回最终画布。
-     * Meeye 这类包的 iconmask 可能比 iconback 小，代表“源图裁切区”
-     * 而不是包含阴影的整张背景。
+     * 调用方负责传入最终应使用的 mask 几何区域。Meeye 这类图标包
+     * 虽然 mask 资源像素小于 back，但启动器会把样式层绘制到同一
+     * viewport；这里按传入区域标准化 mask，不再根据资源原始尺寸
+     * 推导额外缩放。
      */
     val scaledMask = Bitmap.createBitmap(
         maskWidth,
@@ -1448,9 +1571,28 @@ private fun createNormalizedShapeMask(
     val normalizedPixels =
         IntArray(maskWidth * maskHeight)
 
+    val inverseMaskEdgeInset = if (shouldInvert) {
+        (minOf(maskWidth, maskHeight) / 256).coerceIn(1, 3)
+    } else {
+        0
+    }
+
     for (index in rawCoverage.indices) {
+        val x = index % maskWidth
+        val y = index / maskWidth
+        val isInverseMaskEdge =
+            inverseMaskEdgeInset > 0 &&
+                    (
+                            x < inverseMaskEdgeInset ||
+                                    y < inverseMaskEdgeInset ||
+                                    x >= maskWidth - inverseMaskEdgeInset ||
+                                    y >= maskHeight - inverseMaskEdgeInset
+                            )
+
         val normalizedAlpha =
-            if (shouldInvert) {
+            if (isInverseMaskEdge) {
+                0
+            } else if (shouldInvert) {
                 255 - rawCoverage[index]
             } else {
                 rawCoverage[index]
@@ -1482,6 +1624,10 @@ private fun createNormalizedShapeMask(
         maskHeight
     )
 
+    if (!scaledMask.isRecycled) {
+        scaledMask.recycle()
+    }
+
     val outputMask = Bitmap.createBitmap(
         safeSize,
         safeSize,
@@ -1495,9 +1641,6 @@ private fun createNormalizedShapeMask(
         scalePaint
     )
 
-    if (!scaledMask.isRecycled) {
-        scaledMask.recycle()
-    }
     if (!normalizedMask.isRecycled) {
         normalizedMask.recycle()
     }
@@ -1505,36 +1648,23 @@ private fun createNormalizedShapeMask(
     return outputMask
 }
 
-private fun maskDestinationRect(
-    maskBitmap: Bitmap,
-    backBitmap: Bitmap?,
+/**
+ * Launcher-facing style layers share the same icon viewport.
+ *
+ * Meeye stores iconback as 256px and iconmask/iconupon as 192px, but
+ * launchers draw those drawables into the same output bounds instead of
+ * preserving the intrinsic 192/256 ratio. Preserving that ratio makes the
+ * mask too small and leaves a thick white tray that is not visible in the
+ * launcher output.
+ */
+private fun styleLayerDestinationRect(
     outputSize: Int
 ): RectF {
-    if (
-        backBitmap == null ||
-        backBitmap.isRecycled ||
-        backBitmap.width <= 0 ||
-        backBitmap.height <= 0 ||
-        maskBitmap.width <= 0 ||
-        maskBitmap.height <= 0
-    ) {
-        return RectF(0f, 0f, outputSize.toFloat(), outputSize.toFloat())
-    }
-
-    val widthScale = (maskBitmap.width.toFloat() / backBitmap.width.toFloat())
-        .coerceIn(0.1f, 1f)
-    val heightScale = (maskBitmap.height.toFloat() / backBitmap.height.toFloat())
-        .coerceIn(0.1f, 1f)
-    val width = outputSize * widthScale
-    val height = outputSize * heightScale
-    val left = (outputSize - width) / 2f
-    val top = (outputSize - height) / 2f
-
     return RectF(
-        left,
-        top,
-        left + width,
-        top + height
+        0f,
+        0f,
+        outputSize.toFloat(),
+        outputSize.toFloat()
     )
 }
 
@@ -1661,14 +1791,14 @@ private fun fitRectInside(
  *
  * 都严格执行同一条处理流程：
  *
- * 1. 在最终画布上绘制模板 Background 图；
- * 2. 以模板 Mask 的可见边界作为 Source Image 的目标容器；
- * 3. 将 Source Image 的有效内容等比放入容器后裁切；
+ * 1. 如果用户选择了 Background，则在最终画布上绘制它；
+ * 2. 将 Source Image 按 scaleFactor 放入模板 Mask 的可见区域；
+ * 3. 用模板 Mask 裁切 Source Image；
  * 4. 将裁切后的 sourceLayer 绘制到最终画布；
  * 5. 最后绘制 Overlay。
  *
  * 因此“原始图层”和“标准图标”的区别只存在于素材提取阶段，
- * 不会跳过 Mask、Background 或 Overlay。
+ * 不会跳过 Mask、可选 Background 或 Overlay。
  */
 fun generateFinalIcon(
     source: Bitmap?,
@@ -1706,9 +1836,7 @@ fun generateFinalIcon(
             createNormalizedShapeMask(
                 sourceMask = mask,
                 outputSize = outputSize,
-                destinationRect = maskDestinationRect(
-                    maskBitmap = mask,
-                    backBitmap = backBitmap,
+                destinationRect = styleLayerDestinationRect(
                     outputSize = outputSize
                 )
             )
@@ -1832,7 +1960,9 @@ fun generateFinalIcon(
             resultCanvas.drawBitmap(
                 uponBitmap,
                 null,
-                outputRect,
+                styleLayerDestinationRect(
+                    outputSize = outputSize
+                ),
                 normalPaint
             )
         }

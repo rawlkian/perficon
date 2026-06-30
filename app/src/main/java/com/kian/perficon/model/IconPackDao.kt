@@ -21,6 +21,24 @@ interface IconPackDao {
     @Update
     suspend fun updateProject(project: IconPackProject)
 
+    @Query(
+        """
+        UPDATE icon_pack_projects
+        SET iconMaskPath = :maskPath,
+            iconBackPaths = :backPaths,
+            iconUponPath = :uponPath,
+            scaleFactor = :scaleFactor
+        WHERE id = :projectId
+        """
+    )
+    suspend fun updateProjectStyle(
+        projectId: Long,
+        maskPath: String?,
+        backPaths: String?,
+        uponPath: String?,
+        scaleFactor: Float
+    )
+
     @Delete
     suspend fun deleteProject(project: IconPackProject)
 

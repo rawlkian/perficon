@@ -14,6 +14,20 @@ class IconPackRepository(private val dao: IconPackDao) {
 
     suspend fun updateProject(project: IconPackProject) = dao.updateProject(project)
 
+    suspend fun updateProjectStyle(
+        projectId: Long,
+        maskPath: String?,
+        backPaths: String?,
+        uponPath: String?,
+        scaleFactor: Float
+    ) = dao.updateProjectStyle(
+        projectId = projectId,
+        maskPath = maskPath,
+        backPaths = backPaths,
+        uponPath = uponPath,
+        scaleFactor = scaleFactor
+    )
+
     suspend fun deleteProject(project: IconPackProject) = dao.deleteProject(project)
 
     fun getMappingsForProject(projectId: Long): Flow<List<IconMapping>> =
